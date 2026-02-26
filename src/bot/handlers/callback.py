@@ -66,6 +66,8 @@ async def handle_callback_query(
             "conversation": handle_conversation_callback,
             "git": handle_git_callback,
             "export": handle_export_callback,
+            "approve": handle_approve_callback,
+            "change": handle_change_callback,
         }
 
         handler = handlers.get(action)
@@ -1314,3 +1316,160 @@ def _escape_markdown(text: str) -> str:
     Legacy name kept for compatibility with callers; actually escapes HTML.
     """
     return escape_html(text)
+
+
+# ---------------------------------------------------------------------------
+# Dev Team Decision Approval Handlers
+# ---------------------------------------------------------------------------
+
+import json
+import subprocess
+from pathlib import Path
+
+APPROVALS_DIR = Path.home() / ".project-watcher" / "decisions"
+CLAUDE_TOOLS = "Bash,Read,Edit,Write,Glob,Grep,WebFetch"
+
+
+async def handle_approve_callback(
+    query, decision_id: str, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle approval of a dev team decision."""
+    user_id = query.from_user.id
+    logger.info("Decision approved", user_id=user_id, decision_id=decision_id)
+
+    decision_file = APPROVALS_DIR / f"{decision_id}.json"
+
+    if not decision_file.exists():
+        await query.edit_message_text(
+            f"❌ <b>Decision Not Found</b>\n\n"
+            f"Decision <code>{escape_html(decision_id)}</code> was not found. "
+            f"It may have already been processed.",
+            parse_mode="HTML",
+        )
+        return
+
+    try:
+        decision = json.loads(decision_file.read_text())
+        project = decision.get("project", "unknown")
+        tasks = decision.get("tasks", "unknown")
+        decisions = decision.get("decisions", "")
+
+        # Update decision file
+        decision["status"] = "approved"
+        decision_file.write_text(json.dumps(decision, indent=2))
+
+        # Edit message to show approved
+        await query.edit_message_text(
+            f"✅ <b>APPROVED</b> — {escape_html(project)} — {escape_html(tasks)}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"{escape_html(decisions)}\n\n"
+            f"🚀 Starting implementation...",
+            parse_mode="HTML",
+        )
+
+        # Trigger claude -p in background
+        _trigger_approved_work(decision_id, project, tasks, decisions)
+
+    except Exception as e:
+        logger.error("Error handling approval", error=str(e), decision_id=decision_id)
+        await query.edit_message_text(
+            f"❌ <b>Error Processing Approval</b>\n\n{escape_html(str(e))}",
+            parse_mode="HTML",
+        )
+
+
+async def handle_change_callback(
+    query, decision_id: str, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle change request for a dev team decision."""
+    user_id = query.from_user.id
+    logger.info("Decision change requested", user_id=user_id, decision_id=decision_id)
+
+    decision_file = APPROVALS_DIR / f"{decision_id}.json"
+
+    if not decision_file.exists():
+        await query.edit_message_text(
+            f"❌ <b>Decision Not Found</b>\n\n"
+            f"Decision <code>{escape_html(decision_id)}</code> was not found.",
+            parse_mode="HTML",
+        )
+        return
+
+    try:
+        decision = json.loads(decision_file.read_text())
+        project = decision.get("project", "unknown")
+        tasks = decision.get("tasks", "unknown")
+        decisions = decision.get("decisions", "")
+
+        # Update decision file
+        decision["status"] = "awaiting_feedback"
+        decision_file.write_text(json.dumps(decision, indent=2))
+
+        # Store decision_id in user_data so we can match the reply
+        context.user_data["pending_feedback_decision"] = decision_id
+
+        # Edit message to show change requested
+        await query.edit_message_text(
+            f"📝 <b>CHANGES REQUESTED</b> — {escape_html(project)} — {escape_html(tasks)}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"{escape_html(decisions)}\n\n"
+            f"💬 Reply with your feedback. What should be changed?",
+            parse_mode="HTML",
+        )
+
+    except Exception as e:
+        logger.error("Error handling change request", error=str(e), decision_id=decision_id)
+        await query.edit_message_text(
+            f"❌ <b>Error Processing Change Request</b>\n\n{escape_html(str(e))}",
+            parse_mode="HTML",
+        )
+
+
+def _trigger_approved_work(
+    decision_id: str, project: str, tasks: str, decisions: str
+) -> None:
+    """Trigger claude -p in background to implement approved tasks."""
+    project_dir = Path.home() / "projects" / project
+
+    if not project_dir.exists():
+        logger.warning(f"Project dir not found: {project_dir}")
+        return
+
+    prompt = (
+        f"Decisions approved for {project} {tasks}. The approved decisions are:\n\n"
+        f"{decisions}\n\n"
+        f"Run /run-tasks {project_dir} --auto to execute these tasks. "
+        f"Follow the approved decisions exactly. Create a PR for each completed task "
+        f"against the dev branch, then auto-merge it with `gh pr merge --merge --delete-branch`. "
+        f"IMPORTANT: Before starting any task, check if a remote branch task/T-XXX-* "
+        f"already exists (git ls-remote --heads origin). If it does, SKIP that task. "
+        f"When you start a task, push an empty commit to the branch immediately as a lock. "
+        f"After all tasks are done, scan for the next batch of ready tasks and send "
+        f"new decisions via send-decision.sh — do NOT implement them, just propose decisions."
+    )
+
+    output_file = APPROVALS_DIR / f"{decision_id}.output"
+
+    # Launch claude -p in background subprocess
+    cmd = (
+        f'cd "{project_dir}" && unset CLAUDECODE && '
+        f'claude -p {_shell_quote(prompt)} '
+        f'--allowedTools "{CLAUDE_TOOLS}" '
+        f'--output-format json '
+        f'> "{output_file}" 2>&1'
+    )
+
+    subprocess.Popen(
+        cmd,
+        shell=True,
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    logger.info(f"Claude triggered for approved decision: {decision_id}")
+
+
+def _shell_quote(s: str) -> str:
+    """Quote a string for safe shell use."""
+    return "'" + s.replace("'", "'\\''") + "'"
