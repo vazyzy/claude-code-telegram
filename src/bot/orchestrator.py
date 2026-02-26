@@ -344,6 +344,16 @@ class MessageOrchestrator:
             )
         )
 
+        # Dev team decision approval callbacks
+        from .handlers import callback as cb_handlers
+
+        app.add_handler(
+            CallbackQueryHandler(
+                self._inject_deps(cb_handlers.handle_callback_query),
+                pattern=r"^(approve|change):",
+            )
+        )
+
         logger.info("Agentic handlers registered")
 
     def _register_classic_handlers(self, app: Application) -> None:
