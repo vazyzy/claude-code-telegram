@@ -311,3 +311,32 @@ class UserTokenModel:
         if not self.expires_at:
             return False
         return datetime.now(UTC) > self.expires_at
+
+
+@dataclass
+class UserMemoryEntry:
+    """User memory entry for persistent cross-session memory."""
+
+    user_id: int
+    category: str  # 'profile' or 'fact'
+    key: str
+    value: str
+    id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        data = asdict(self)
+        for key in ["created_at", "updated_at"]:
+            if data[key]:
+                data[key] = data[key].isoformat()
+        return data
+
+    @classmethod
+    def from_row(cls, row: aiosqlite.Row) -> "UserMemoryEntry":
+        """Create from database row."""
+        data = dict(row)
+        for field in ["created_at", "updated_at"]:
+            data[field] = _parse_datetime(data.get(field))
+        return cls(**data)

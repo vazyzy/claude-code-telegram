@@ -20,6 +20,7 @@ from .models import (
     ProjectThreadModel,
     SessionModel,
     ToolUsageModel,
+    UserMemoryEntry,
     UserModel,
 )
 
@@ -829,3 +830,61 @@ class AnalyticsRepository:
                 "tool_stats": tool_stats,
                 "daily_activity": daily_activity,
             }
+
+
+class UserMemoryRepository:
+    """Persistent user memory storage."""
+
+    def __init__(self, db_manager: DatabaseManager):
+        """Initialize repository."""
+        self.db = db_manager
+
+    async def get_user_memory(self, user_id: int) -> List[UserMemoryEntry]:
+        """Get all memory entries for a user."""
+        async with self.db.get_connection() as conn:
+            cursor = await conn.execute(
+                "SELECT * FROM user_memory WHERE user_id = ? ORDER BY category, key",
+                (user_id,),
+            )
+            rows = await cursor.fetchall()
+            return [UserMemoryEntry.from_row(row) for row in rows]
+
+    async def upsert_entry(self, entry: UserMemoryEntry) -> None:
+        """Insert or update a memory entry."""
+        async with self.db.get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO user_memory (user_id, category, key, value, created_at, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, category, key)
+                DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                """,
+                (entry.user_id, entry.category, entry.key, entry.value),
+            )
+            await conn.commit()
+
+    async def delete_entry(self, user_id: int, category: str, key: str) -> None:
+        """Delete a memory entry."""
+        async with self.db.get_connection() as conn:
+            await conn.execute(
+                "DELETE FROM user_memory WHERE user_id = ? AND category = ? AND key = ?",
+                (user_id, category, key),
+            )
+            await conn.commit()
+
+    async def delete_oldest_facts(self, user_id: int, keep_count: int) -> None:
+        """Delete oldest facts beyond keep_count for a user."""
+        async with self.db.get_connection() as conn:
+            await conn.execute(
+                """
+                DELETE FROM user_memory
+                WHERE id IN (
+                    SELECT id FROM user_memory
+                    WHERE user_id = ? AND category = 'fact'
+                    ORDER BY updated_at DESC
+                    LIMIT -1 OFFSET ?
+                )
+                """,
+                (user_id, keep_count),
+            )
+            await conn.commit()

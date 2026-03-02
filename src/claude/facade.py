@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional
 import structlog
 
 from ..config.settings import Settings
+from .memory import UserMemoryService
 from .sdk_integration import ClaudeResponse, ClaudeSDKManager, StreamUpdate
 from .session import SessionManager
 
@@ -23,11 +24,13 @@ class ClaudeIntegration:
         config: Settings,
         sdk_manager: Optional[ClaudeSDKManager] = None,
         session_manager: Optional[SessionManager] = None,
+        memory_service: Optional[UserMemoryService] = None,
     ):
         """Initialize Claude integration facade."""
         self.config = config
         self.sdk_manager = sdk_manager or ClaudeSDKManager(config)
         self.session_manager = session_manager
+        self.memory_service = memory_service
 
     async def run_command(
         self,
@@ -71,6 +74,18 @@ class ClaudeIntegration:
 
         # Execute command
         try:
+            # Build memory prompt if memory service is available
+            memory_prompt = None
+            if self.memory_service:
+                try:
+                    memory_prompt = await self.memory_service.build_memory_prompt(
+                        user_id
+                    )
+                except Exception as mem_err:
+                    logger.warning(
+                        "Failed to build memory prompt", error=str(mem_err)
+                    )
+
             # Continue session if we have an existing session with a real ID
             is_new = getattr(session, "is_new_session", False)
             should_continue = not is_new and bool(session.session_id)
@@ -85,6 +100,7 @@ class ClaudeIntegration:
                     session_id=claude_session_id,
                     continue_session=should_continue,
                     stream_callback=on_stream,
+                    append_system_prompt=memory_prompt,
                 )
             except Exception as resume_error:
                 # If resume failed (e.g., session expired/missing on Claude's side),
@@ -109,9 +125,28 @@ class ClaudeIntegration:
                         session_id=None,
                         continue_session=False,
                         stream_callback=on_stream,
+                        append_system_prompt=memory_prompt,
                     )
                 else:
                     raise
+
+            # Process memory updates from response
+            if self.memory_service and response.content:
+                try:
+                    updates = self.memory_service.parse_memory_updates(
+                        response.content
+                    )
+                    if updates:
+                        await self.memory_service.apply_memory_updates(
+                            user_id, updates
+                        )
+                        response.content = self.memory_service.strip_memory_block(
+                            response.content
+                        )
+                except Exception as mem_err:
+                    logger.warning(
+                        "Failed to process memory updates", error=str(mem_err)
+                    )
 
             # Update session (assigns real session_id for new sessions)
             await self.session_manager.update_session(session, response)
@@ -152,6 +187,7 @@ class ClaudeIntegration:
         session_id: Optional[str] = None,
         continue_session: bool = False,
         stream_callback: Optional[Callable] = None,
+        append_system_prompt: Optional[str] = None,
     ) -> ClaudeResponse:
         """Execute command via SDK."""
         return await self.sdk_manager.execute_command(
@@ -160,6 +196,7 @@ class ClaudeIntegration:
             session_id=session_id,
             continue_session=continue_session,
             stream_callback=stream_callback,
+            append_system_prompt=append_system_prompt,
         )
 
     async def _find_resumable_session(

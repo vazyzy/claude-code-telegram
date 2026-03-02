@@ -152,6 +152,7 @@ class ClaudeSDKManager:
         session_id: Optional[str] = None,
         continue_session: bool = False,
         stream_callback: Optional[Callable[[StreamUpdate], None]] = None,
+        append_system_prompt: Optional[str] = None,
     ) -> ClaudeResponse:
         """Execute Claude Code command via SDK."""
         start_time = asyncio.get_event_loop().time()
@@ -210,6 +211,10 @@ class ClaudeSDKManager:
                 setting_sources=["project"],
                 stderr=_stderr_callback,
             )
+
+            # Inject additional system prompt (e.g. user memory)
+            if append_system_prompt:
+                options.append_system_prompt = append_system_prompt
 
             # Pass MCP server configuration if enabled
             if self.config.enable_mcp and self.config.mcp_config_path:

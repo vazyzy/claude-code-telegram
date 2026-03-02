@@ -16,6 +16,7 @@ from src.claude import (
     ClaudeIntegration,
     SessionManager,
 )
+from src.claude.memory import UserMemoryService
 from src.claude.sdk_integration import ClaudeSDKManager
 from src.config.features import FeatureFlags
 from src.config.settings import Settings
@@ -144,10 +145,17 @@ async def create_application(config: Settings) -> Dict[str, Any]:
     logger.info("Using Claude Python SDK integration")
     sdk_manager = ClaudeSDKManager(config, security_validator=security_validator)
 
+    # Create memory service for persistent user memory
+    memory_service = UserMemoryService(
+        memory_repo=storage.user_memory,
+        max_facts=20,
+    )
+
     claude_integration = ClaudeIntegration(
         config=config,
         sdk_manager=sdk_manager,
         session_manager=session_manager,
+        memory_service=memory_service,
     )
 
     # --- Event bus and agentic platform components ---
