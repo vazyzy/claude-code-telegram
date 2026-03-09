@@ -85,7 +85,7 @@ def gather_obsidian_projects() -> List[Dict[str, Any]]:
     return sorted(projects, key=lambda p: p["priority"], reverse=True)
 
 
-HEARTBEAT_PROMPT = """You are a personal project coach. Analyze the data below and write a short, actionable Telegram message (max 300 words, minimal formatting).
+HEARTBEAT_PROMPT = """You are a personal project coach. Analyze the data below and write a Telegram message (max 300 words).
 
 ## OBSIDIAN PROJECT SCORES (user's priorities)
 Priority = (Interest x2 + Impact + Earnings + Confidence) / Effort
@@ -107,7 +107,25 @@ Priority = (Interest x2 + Impact + Earnings + Confidence) / Effort
 
 4. NEVER list all projects. Focus on what matters TODAY.
 
-Tone: friendly coach, casual, direct. Can mix English and Russian. No guilt trips."""
+## FORMAT (strict)
+
+Use this exact structure with emojis and line breaks for readability:
+
+🌅 Good morning!
+
+🎯 Focus today:
+1. [emoji] **Project** — specific action
+2. [emoji] **Project** — specific action
+
+⚠️ Heads up:
+• one-liner about risk/cooldown/spread
+
+💡 Tip:
+• one motivational or strategic insight
+
+Use relevant emojis (🔥 momentum, 🧊 cooling, 📦 uncommitted, 🚀 launch, 🎸 music, 💰 earnings).
+Tone: friendly coach, casual, direct. Can mix English and Russian. No guilt trips.
+Keep it scannable — short lines, not paragraphs."""
 
 
 def build_heartbeat_prompt() -> str:
