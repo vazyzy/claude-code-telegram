@@ -238,3 +238,98 @@ def build_heartbeat_prompt() -> str:
         goals_data=goals_data,
         git_report=git_report,
     )
+
+
+WEEKLY_REVIEW_PROMPT = """You are a personal project coach doing a WEEKLY REVIEW. Analyze everything below and write a Telegram message (max 500 words).
+
+## PROJECTS (ranked by priority)
+{obsidian_data}
+
+## GOALS & TASKS
+{goals_data}
+
+## GIT ACTIVITY (this week)
+{git_report}
+
+## YOUR JOB — WEEKLY REVIEW
+
+This runs every Sunday. Help the user reflect and plan:
+
+1. **What happened this week?**
+   - Which projects got commits? How many?
+   - Any goals completed or tasks checked off?
+   - Any projects that went cold?
+
+2. **Score check — are priorities still right?**
+   - If a project with high priority got zero commits, ask why — lost interest? blocked? Should scores change?
+   - If a low-priority project got lots of commits, maybe it deserves higher scores?
+   - Flag any projects with priority=0 that are active
+
+3. **Goals check**
+   - Any goals with all tasks done? Suggest marking as done and creating next milestone
+   - Any goals stale for 2+ weeks? Should they be revised or dropped?
+
+4. **Plan next week**
+   - Suggest top 2-3 goals to focus on
+   - Recommend one project to park if spread too thin
+
+## FORMAT (strict)
+
+📊 Weekly Review
+
+🔙 This week:
+• project: X commits, [what happened]
+• project: went cold
+
+🎯 Scores check:
+• any mismatches between priority and actual work?
+• suggest specific score changes if needed
+
+✅ Goals update:
+• completed / stale / on track
+
+📋 Next week focus:
+1. [emoji] **Project → Goal** — why
+2. [emoji] **Project → Goal** — why
+
+Tone: reflective, honest, constructive. Mix English and Russian ok."""
+
+
+def build_weekly_review_prompt() -> str:
+    """Build the weekly review prompt."""
+    git_report = generate_heartbeat_report()
+    obsidian_projects = gather_obsidian_projects()
+    obsidian_goals = gather_obsidian_goals()
+
+    project_priority = {p["name"]: p["priority"] for p in obsidian_projects}
+
+    obsidian_lines = []
+    for p in obsidian_projects:
+        parts = [f"{p['name']} (priority={p['priority']}, status={p['status']})"]
+        if p["why"]:
+            parts.append(f"  why: {p['why']}")
+        obsidian_lines.append("\n".join(parts))
+
+    obsidian_data = "\n".join(obsidian_lines) if obsidian_lines else "(no scores yet)"
+
+    for g in obsidian_goals:
+        g["effective_priority"] = project_priority.get(g["project"], 0) * g["importance"]
+
+    sorted_goals = sorted(obsidian_goals, key=lambda g: g["effective_priority"], reverse=True)
+
+    goal_lines = []
+    for g in sorted_goals:
+        proj_pri = project_priority.get(g["project"], 0)
+        done = sum(1 for t in g["tasks"] if t.get("done"))
+        total = len(g["tasks"]) + done  # open_tasks + done tasks
+        header = f"{g['project']} → {g['name']} (effective={g['effective_priority']}, {done}/{total} tasks done)"
+        task_list = "\n".join(f"  - [ ] {t['text']}" for t in g["tasks"])
+        goal_lines.append(f"{header}\n{task_list}")
+
+    goals_data = "\n".join(goal_lines) if goal_lines else "(no goals with open tasks)"
+
+    return WEEKLY_REVIEW_PROMPT.format(
+        obsidian_data=obsidian_data,
+        goals_data=goals_data,
+        git_report=git_report,
+    )

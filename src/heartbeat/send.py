@@ -20,7 +20,7 @@ from pathlib import Path
 import httpx
 import structlog
 
-from .prompt import build_heartbeat_prompt
+from .prompt import build_heartbeat_prompt, build_weekly_review_prompt
 
 logger = structlog.get_logger()
 
@@ -43,9 +43,8 @@ async def send_telegram_message(token: str, chat_id: int, text: str) -> bool:
         return resp.status_code == 200
 
 
-async def generate_heartbeat_message() -> str:
-    """Generate heartbeat message using Claude CLI or API."""
-    prompt = build_heartbeat_prompt()
+async def _call_claude(prompt: str) -> str:
+    """Call Claude via API or CLI."""
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if api_key:
@@ -74,9 +73,18 @@ async def generate_heartbeat_message() -> str:
         return stdout.decode().strip()
 
 
-async def main() -> None:
-    """Gather data, generate message, send via Telegram."""
-    # Load .env if dotenv is available
+async def generate_heartbeat_message() -> str:
+    """Generate daily heartbeat."""
+    return await _call_claude(build_heartbeat_prompt())
+
+
+async def generate_weekly_review() -> str:
+    """Generate weekly review."""
+    return await _call_claude(build_weekly_review_prompt())
+
+
+def _load_env() -> tuple:
+    """Load env and return (token, chat_id)."""
     try:
         from dotenv import load_dotenv
         env_file = Path(__file__).parent.parent.parent / ".env"
@@ -87,13 +95,26 @@ async def main() -> None:
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("HEARTBEAT_CHAT_ID") or os.environ.get("NOTIFICATION_CHAT_IDS", "").split(",")[0].strip()
+    return token, chat_id
+
+
+async def main() -> None:
+    """Gather data, generate message, send via Telegram."""
+    token, chat_id = _load_env()
 
     if not token or not chat_id:
         print("Missing TELEGRAM_BOT_TOKEN or HEARTBEAT_CHAT_ID")
         sys.exit(1)
 
-    print("Gathering project data...")
-    message = await generate_heartbeat_message()
+    # Check if weekly review mode
+    is_weekly = "--weekly" in sys.argv
+
+    if is_weekly:
+        print("Generating weekly review...")
+        message = await generate_weekly_review()
+    else:
+        print("Gathering project data...")
+        message = await generate_heartbeat_message()
 
     print(f"Generated message ({len(message)} chars):")
     print(message)
