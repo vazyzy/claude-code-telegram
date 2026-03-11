@@ -75,7 +75,8 @@ async def _call_claude(prompt: str) -> str:
 
 async def generate_heartbeat_message() -> str:
     """Generate daily heartbeat."""
-    return await _call_claude(build_heartbeat_prompt())
+    prompt = await build_heartbeat_prompt()
+    return await _call_claude(prompt)
 
 
 async def generate_weekly_review() -> str:

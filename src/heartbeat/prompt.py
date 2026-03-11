@@ -1,11 +1,15 @@
 """Heartbeat prompt builder.
 
-Combines git activity data + Obsidian project metadata
+Combines git activity data + Obsidian project metadata + Google Calendar events
 for Claude to generate a smart daily focus message.
 """
 
+import asyncio
+import json
 import os
 import re
+import shutil
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -155,7 +159,55 @@ def gather_obsidian_goals() -> List[Dict[str, Any]]:
     return goals
 
 
+async def gather_calendar_events() -> str:
+    """Fetch today's Google Calendar events via gws CLI."""
+    if not shutil.which("gws"):
+        return "(Google Calendar not configured)"
+
+    today = datetime.now().strftime("%Y-%m-%dT00:00:00Z")
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gws", "calendar", "events", "list",
+            "--params", json.dumps({
+                "calendarId": "primary",
+                "timeMin": today,
+                "timeMax": tomorrow,
+                "singleEvents": True,
+                "orderBy": "startTime",
+            }),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            return f"(calendar error: {stderr.decode()[:100]})"
+
+        data = json.loads(stdout.decode())
+        items = data.get("items", [])
+        if not items:
+            return "No events today — clear schedule for deep work!"
+
+        lines = []
+        for event in items:
+            summary = event.get("summary", "Untitled")
+            start = event.get("start", {})
+            time_str = start.get("dateTime", start.get("date", ""))
+            if "T" in time_str:
+                time_str = time_str[11:16]  # HH:MM
+            lines.append(f"• {time_str} — {summary}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"(calendar unavailable: {e})"
+
+
 HEARTBEAT_PROMPT = """You are a personal project coach. Analyze the data below and write a Telegram message (max 300 words).
+
+## CALENDAR (today's schedule)
+{calendar_data}
 
 ## PROJECTS (ranked by priority)
 {obsidian_data}
@@ -182,6 +234,9 @@ Rules:
 
 🌅 Good morning!
 
+📅 Today's schedule:
+• event time — event name (only if calendar has events; skip section if empty)
+
 🎯 Today's tasks:
 1. [emoji] **Project → Goal** — specific task
 2. [emoji] **Project → Goal** — specific task
@@ -194,14 +249,16 @@ Rules:
 
 Use relevant emojis (🔥 momentum, 🧊 cooling, 📦 uncommitted, 🚀 launch, 🎸 music, 💰 earnings).
 Tone: friendly coach, casual, direct. Can mix English and Russian. No guilt trips.
-Keep it scannable — short lines, not paragraphs."""
+Keep it scannable — short lines, not paragraphs.
+If calendar is empty, emphasize it's a great day for deep work."""
 
 
-def build_heartbeat_prompt() -> str:
-    """Build the full prompt with git activity + Obsidian project/goal data."""
+async def build_heartbeat_prompt() -> str:
+    """Build the full prompt with calendar + git activity + Obsidian project/goal data."""
     git_report = generate_heartbeat_report()
     obsidian_projects = gather_obsidian_projects()
     obsidian_goals = gather_obsidian_goals()
+    calendar_data = await gather_calendar_events()
 
     # Build project priority lookup
     project_priority = {p["name"]: p["priority"] for p in obsidian_projects}
@@ -234,6 +291,7 @@ def build_heartbeat_prompt() -> str:
     goals_data = "\n".join(goal_lines) if goal_lines else "(no goals with open tasks)"
 
     return HEARTBEAT_PROMPT.format(
+        calendar_data=calendar_data,
         obsidian_data=obsidian_data,
         goals_data=goals_data,
         git_report=git_report,
