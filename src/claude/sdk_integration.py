@@ -68,11 +68,18 @@ def _make_can_use_tool_callback(
     security_validator: SecurityValidator,
     working_directory: Path,
     approved_directory: Path,
+    ask_user_callback: Optional[Callable] = None,
 ) -> Any:
     """Create a can_use_tool callback for SDK-level tool permission validation.
 
     The callback validates file path boundaries and bash directory boundaries
     *before* the SDK executes the tool, providing preventive security enforcement.
+
+    When ask_user_callback is provided, AskUserQuestion tool calls are intercepted
+    and routed to the callback (e.g. Telegram inline keyboard) to collect real user
+    answers. The callback signature is:
+        async def ask_user_callback(tool_input: dict) -> dict[str, str]
+    It receives the full AskUserQuestion input and returns {question: answer} mapping.
     """
     _FILE_TOOLS = {"Write", "Edit", "Read", "create_file", "edit_file", "read_file"}
     _BASH_TOOLS = {"Bash", "bash", "shell"}
@@ -82,6 +89,23 @@ def _make_can_use_tool_callback(
         tool_input: Dict[str, Any],
         context: ToolPermissionContext,
     ) -> Any:
+        # Intercept AskUserQuestion to collect answers via Telegram
+        if tool_name == "AskUserQuestion" and ask_user_callback:
+            try:
+                answers = await ask_user_callback(tool_input)
+                logger.info(
+                    "AskUserQuestion answered via callback",
+                    num_answers=len(answers),
+                )
+                updated_input = {**tool_input, "answers": answers}
+                return PermissionResultAllow(updated_input=updated_input)
+            except Exception as e:
+                logger.warning(
+                    "AskUserQuestion callback failed, allowing without answers",
+                    error=str(e),
+                )
+                return PermissionResultAllow()
+
         # File path validation
         if tool_name in _FILE_TOOLS:
             file_path = tool_input.get("file_path") or tool_input.get("path")
@@ -153,6 +177,7 @@ class ClaudeSDKManager:
         continue_session: bool = False,
         stream_callback: Optional[Callable[[StreamUpdate], None]] = None,
         append_system_prompt: Optional[str] = None,
+        ask_user_callback: Optional[Callable] = None,
     ) -> ClaudeResponse:
         """Execute Claude Code command via SDK."""
         start_time = asyncio.get_event_loop().time()
@@ -230,6 +255,7 @@ class ClaudeSDKManager:
                     security_validator=self.security_validator,
                     working_directory=working_directory,
                     approved_directory=self.config.approved_directory,
+                    ask_user_callback=ask_user_callback,
                 )
 
             # Resume previous session if we have a session_id
