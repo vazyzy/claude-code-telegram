@@ -108,6 +108,47 @@ Feature flags in `src/config/features.py` control: MCP, git integration, file up
 
 All datetimes use timezone-aware UTC: `datetime.now(UTC)` (not `datetime.utcnow()`). SQLite adapters auto-convert TIMESTAMP/DATETIME columns to `datetime` objects via `detect_types=PARSE_DECLTYPES`. Model `from_row()` methods must guard `fromisoformat()` calls with `isinstance(val, str)` checks.
 
+## Telegram Formatting Guidelines
+
+Telegram does NOT support markdown tables. Never use `| col | col |` syntax — it renders as broken plain text.
+
+Instead, use one of these approaches:
+
+**For small data (≤5 rows):** Use bold labels with line breaks
+```
+**Node.js** — v24.13.1
+**Python** — 3.12.3
+**Docker** — 29.2.1
+```
+
+**For larger structured data:** Use a monospace code block with manually aligned columns.
+Rules:
+- Pad every column value with spaces to the same width
+- Use a `───` separator line after the header
+- Use a blank line between every data row for readability
+- Right-align numeric columns
+
+```
+Project      Status   Commits
+─────────────────────────────
+Pro Hub      active       156
+
+Moral Code   active        84
+
+Claude Bot   active        42
+
+Arbitr       paused        12
+```
+
+**For comparison/matrix data:** Use grouped bullet lists
+```
+• Pro Hub
+  Status: active | Commits: 156 | Priority: high
+
+• Moral Code
+  Status: active | Commits: 84 | Priority: highest
+```
+
 ## Code Style
 
 - Black (88 char line length), isort (black profile), flake8, mypy strict, autoflake for unused imports
