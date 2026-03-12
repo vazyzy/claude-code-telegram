@@ -68,6 +68,7 @@ async def handle_callback_query(
             "export": handle_export_callback,
             "approve": handle_approve_callback,
             "change": handle_change_callback,
+            "checkin": handle_checkin_callback,
         }
 
         handler = handlers.get(action)
