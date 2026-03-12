@@ -67,6 +67,14 @@ class FeatureFlags:
         return self.settings.enable_scheduler
 
     @property
+    def voice_messages_enabled(self) -> bool:
+        """Check if voice message transcription is enabled."""
+        return (
+            self.settings.enable_voice_messages
+            and self.settings.openai_api_key is not None
+        )
+
+    @property
     def agentic_mode_enabled(self) -> bool:
         """Check if agentic conversational mode is enabled."""
         return self.settings.agentic_mode
@@ -85,6 +93,7 @@ class FeatureFlags:
             "api_server": self.api_server_enabled,
             "scheduler": self.scheduler_enabled,
             "agentic_mode": self.agentic_mode_enabled,
+            "voice_messages": self.voice_messages_enabled,
         }
         return feature_map.get(feature_name, False)
 
@@ -111,4 +120,6 @@ class FeatureFlags:
             features.append("api_server")
         if self.scheduler_enabled:
             features.append("scheduler")
+        if self.voice_messages_enabled:
+            features.append("voice_messages")
         return features

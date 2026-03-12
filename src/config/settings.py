@@ -167,6 +167,12 @@ class Settings(BaseSettings):
     enable_git_integration: bool = Field(True, description="Enable git commands")
     enable_file_uploads: bool = Field(True, description="Enable file upload handling")
     enable_quick_actions: bool = Field(True, description="Enable quick action buttons")
+    enable_voice_messages: bool = Field(
+        False, description="Enable voice message transcription via OpenAI Whisper"
+    )
+    openai_api_key: Optional[SecretStr] = Field(
+        None, description="OpenAI API key for Whisper speech-to-text"
+    )
     agentic_mode: bool = Field(
         True,
         description="Conversational agentic mode (default) vs classic command mode",
@@ -384,6 +390,11 @@ class Settings(BaseSettings):
         if self.enable_mcp and not self.mcp_config_path:
             raise ValueError("mcp_config_path required when enable_mcp is True")
 
+        if self.enable_voice_messages and not self.openai_api_key:
+            raise ValueError(
+                "openai_api_key required when enable_voice_messages is True"
+            )
+
         if self.enable_project_threads:
             if (
                 self.project_threads_mode == "group"
@@ -424,6 +435,11 @@ class Settings(BaseSettings):
         if self.auth_token_secret:
             return self.auth_token_secret.get_secret_value()
         return None
+
+    @property
+    def openai_api_key_str(self) -> Optional[str]:
+        """Get OpenAI API key as string."""
+        return self.openai_api_key.get_secret_value() if self.openai_api_key else None
 
     @property
     def anthropic_api_key_str(self) -> Optional[str]:
