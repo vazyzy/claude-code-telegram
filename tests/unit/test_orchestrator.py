@@ -150,8 +150,8 @@ def test_agentic_registers_text_document_photo_handlers(agentic_settings, deps):
 
     # 3 message handlers (text, document, photo)
     assert len(msg_handlers) == 3
-    # 1 callback handler (for cd: only)
-    assert len(cb_handlers) == 1
+    # 3 callback handlers (askq:, cd:, approve/change:)
+    assert len(cb_handlers) == 3
 
 
 async def test_agentic_bot_commands(agentic_settings, deps):
@@ -310,10 +310,11 @@ async def test_agentic_callback_scoped_to_cd_pattern(agentic_settings, deps):
         if isinstance(call[0][0], CallbackQueryHandler)
     ]
 
-    assert len(cb_handlers) == 1
-    # The pattern attribute should match cd: prefixed data
-    assert cb_handlers[0].pattern is not None
-    assert cb_handlers[0].pattern.match("cd:my_project")
+    assert len(cb_handlers) == 3
+    # Find the cd: handler and verify its pattern
+    cd_handler = [h for h in cb_handlers if h.pattern and h.pattern.match("cd:x")]
+    assert len(cd_handler) == 1
+    assert cd_handler[0].pattern.match("cd:my_project")
 
 
 async def test_agentic_document_rejects_large_files(agentic_settings, deps):

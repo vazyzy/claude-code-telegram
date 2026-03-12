@@ -40,6 +40,124 @@ from .utils.image_extractor import (
 
 logger = structlog.get_logger()
 
+# Pending AskUserQuestion futures: chat_id -> asyncio.Future[dict[str, str]]
+_pending_ask_user: Dict[int, asyncio.Future] = {}  # type: ignore[type-arg]
+
+
+async def _handle_ask_user_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle inline keyboard responses for AskUserQuestion.
+
+    Callback data format: ``askq:<question_index>:<option_label>``
+    """
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+
+    chat_id = getattr(query.message, "chat_id", None) if query.message else None
+    if not chat_id or chat_id not in _pending_ask_user:
+        return
+
+    parts = query.data.split(":", 2)
+    if len(parts) != 3:
+        return
+
+    _, q_idx_str, choice_label = parts
+
+    # Resolve the future with the answer
+    future = _pending_ask_user.pop(chat_id, None)
+    if future and not future.done():
+        future.set_result({q_idx_str: choice_label})
+
+    # Update the message to show what was chosen
+    if query.message:
+        try:
+            await query.message.edit_text(
+                f"{query.message.text}\n\n✅ <b>{choice_label}</b>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+
+def _make_ask_user_callback(chat: Any) -> Callable:
+    """Create an ask_user_callback bound to a Telegram chat.
+
+    Returns an async function that sends inline keyboard buttons for each
+    AskUserQuestion question, waits for the user to tap one, and returns
+    ``{question_text: chosen_label}`` mapping.
+    """
+
+    async def ask_user(tool_input: Dict[str, Any]) -> Dict[str, str]:
+        questions = tool_input.get("questions", [])
+        if not questions:
+            return {}
+
+        answers: Dict[str, str] = {}
+
+        for i, q in enumerate(questions):
+            question_text = q.get("question", "Choose an option:")
+            options = q.get("options", [])
+
+            if not options:
+                continue
+
+            # Build inline keyboard — one button per option
+            keyboard = []
+            for opt in options:
+                label = opt.get("label", "?")
+                cb_data = f"askq:{i}:{label}"
+                # Telegram limits callback_data to 64 bytes
+                if len(cb_data.encode()) > 64:
+                    cb_data = f"askq:{i}:{label[:40]}"
+                keyboard.append([InlineKeyboardButton(label, callback_data=cb_data)])
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            # Build display text
+            header = q.get("header", "")
+            display = (
+                f"❓ <b>{header}</b>\n{question_text}"
+                if header
+                else f"❓ {question_text}"
+            )
+            for opt in options:
+                desc = opt.get("description", "")
+                if desc:
+                    display += f"\n• <b>{opt['label']}</b> — {desc}"
+
+            await chat.send_message(
+                display, parse_mode="HTML", reply_markup=reply_markup
+            )
+
+            # Wait for user to tap a button (timeout 2 min)
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future = loop.create_future()  # type: ignore[type-arg]
+            _pending_ask_user[chat.id] = future
+
+            try:
+                result = await asyncio.wait_for(future, timeout=120)
+                chosen = list(result.values())[0] if result else ""
+                answers[question_text] = chosen
+            except asyncio.TimeoutError:
+                # Fall back to first option on timeout
+                answers[question_text] = (
+                    options[0].get("label", "") if options else ""
+                )
+                _pending_ask_user.pop(chat.id, None)
+                # Edit message to show timeout
+                try:
+                    await chat.send_message("⏰ No selection — using default.")
+                except Exception:
+                    pass
+
+        return answers
+
+    return ask_user
+
+
 # Patterns that look like secrets/credentials in CLI arguments
 _SECRET_PATTERNS: List[re.Pattern[str]] = [
     # API keys / tokens (sk-ant-..., sk-..., ghp_..., gho_..., github_pat_..., xoxb-...)
@@ -334,6 +452,14 @@ class MessageOrchestrator:
         app.add_handler(
             MessageHandler(filters.PHOTO, self._inject_deps(self.agentic_photo)),
             group=10,
+        )
+
+        # AskUserQuestion inline keyboard callbacks (no deps needed)
+        app.add_handler(
+            CallbackQueryHandler(
+                _handle_ask_user_callback,
+                pattern=r"^askq:",
+            )
         )
 
         # Only cd: callbacks (for project selection), scoped by pattern
@@ -888,6 +1014,9 @@ class MessageOrchestrator:
         # Independent typing heartbeat — stays alive even with no stream events
         heartbeat = self._start_typing_heartbeat(chat)
 
+        # Build ask_user callback for AskUserQuestion → inline keyboard
+        ask_user_cb = _make_ask_user_callback(chat)
+
         success = True
         try:
             claude_response = await claude_integration.run_command(
@@ -897,6 +1026,7 @@ class MessageOrchestrator:
                 session_id=session_id,
                 on_stream=on_stream,
                 force_new=force_new,
+                ask_user_callback=ask_user_cb,
             )
 
             # New session created successfully — clear the one-shot flag
@@ -1127,6 +1257,7 @@ class MessageOrchestrator:
             approved_directory=self.settings.approved_directory,
         )
 
+        ask_user_cb = _make_ask_user_callback(chat)
         heartbeat = self._start_typing_heartbeat(chat)
         try:
             claude_response = await claude_integration.run_command(
@@ -1136,6 +1267,7 @@ class MessageOrchestrator:
                 session_id=session_id,
                 on_stream=on_stream,
                 force_new=force_new,
+                ask_user_callback=ask_user_cb,
             )
 
             if force_new:
@@ -1261,6 +1393,7 @@ class MessageOrchestrator:
                 approved_directory=self.settings.approved_directory,
             )
 
+            ask_user_cb = _make_ask_user_callback(chat)
             heartbeat = self._start_typing_heartbeat(chat)
             try:
                 claude_response = await claude_integration.run_command(
@@ -1270,6 +1403,7 @@ class MessageOrchestrator:
                     session_id=session_id,
                     on_stream=on_stream,
                     force_new=force_new,
+                    ask_user_callback=ask_user_cb,
                 )
             finally:
                 heartbeat.cancel()

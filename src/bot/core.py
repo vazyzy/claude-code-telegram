@@ -60,6 +60,11 @@ class ClaudeCodeBot:
         builder.write_timeout(30)
         builder.pool_timeout(30)
 
+        # Enable concurrent update processing so that inline keyboard
+        # callbacks (e.g. AskUserQuestion) can be dispatched while a
+        # message handler is still awaiting the Claude SDK response.
+        builder.concurrent_updates(True)
+
         self.app = builder.build()
 
         # Initialize feature registry
