@@ -29,17 +29,23 @@ async def send_telegram_message(token: str, chat_id: int, text: str) -> bool:
     """Send a message via Telegram Bot API."""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     async with httpx.AsyncClient() as client:
-        resp = await client.post(url, json={
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-        })
-        if resp.status_code != 200:
-            # Retry without markdown if formatting fails
-            resp = await client.post(url, json={
+        resp = await client.post(
+            url,
+            json={
                 "chat_id": chat_id,
                 "text": text,
-            })
+                "parse_mode": "Markdown",
+            },
+        )
+        if resp.status_code != 200:
+            # Retry without markdown if formatting fails
+            resp = await client.post(
+                url,
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                },
+            )
         return resp.status_code == 200
 
 
@@ -62,7 +68,11 @@ async def _call_claude(prompt: str) -> str:
         # Use Claude CLI (uses OAuth session, no API key needed)
         env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         proc = await asyncio.create_subprocess_exec(
-            "claude", "-p", prompt, "--model", "claude-sonnet-4-20250514",
+            "claude",
+            "-p",
+            prompt,
+            "--model",
+            "claude-sonnet-4-20250514",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
@@ -88,6 +98,7 @@ def _load_env() -> tuple:
     """Load env and return (token, chat_id)."""
     try:
         from dotenv import load_dotenv
+
         env_file = Path(__file__).parent.parent.parent / ".env"
         if env_file.exists():
             load_dotenv(env_file)
@@ -95,7 +106,10 @@ def _load_env() -> tuple:
         pass
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("HEARTBEAT_CHAT_ID") or os.environ.get("NOTIFICATION_CHAT_IDS", "").split(",")[0].strip()
+    chat_id = (
+        os.environ.get("HEARTBEAT_CHAT_ID")
+        or os.environ.get("NOTIFICATION_CHAT_IDS", "").split(",")[0].strip()
+    )
     return token, chat_id
 
 

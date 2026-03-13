@@ -10,11 +10,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 PROJECTS_DIR = Path.home() / "projects"
 
 # Skip work-related directories
-SKIP_DIRS = {"gitlaw", "gitlaw-ai", "claude-marketplace", "skills", "eaglelaw-spec", "venv"}
+SKIP_DIRS = {
+    "gitlaw",
+    "gitlaw-ai",
+    "claude-marketplace",
+    "skills",
+    "eaglelaw-spec",
+    "venv",
+}
 
 
 def run_git(repo: Path, *args: str, timeout: int = 5) -> Optional[str]:
@@ -76,9 +82,13 @@ def get_git_info(repo: Path) -> Optional[Dict[str, Any]]:
 
     # Recent branches with activity (local + remote)
     branches_raw = run_git(
-        repo, "for-each-ref", "--sort=-committerdate",
+        repo,
+        "for-each-ref",
+        "--sort=-committerdate",
         "--format=%(refname:short)|%(committerdate:iso)",
-        "--count=5", "refs/heads/", "refs/remotes/origin/"
+        "--count=5",
+        "refs/heads/",
+        "refs/remotes/origin/",
     )
     recent_branches = []
     seen_branch_names = set()
@@ -89,7 +99,9 @@ def get_git_info(repo: Path) -> Optional[Dict[str, Any]]:
                 bname = b_parts[0].replace("origin/", "")
                 if bname not in seen_branch_names and bname != "HEAD":
                     seen_branch_names.add(bname)
-                    recent_branches.append({"name": b_parts[0], "last_commit": b_parts[1].strip()})
+                    recent_branches.append(
+                        {"name": b_parts[0], "last_commit": b_parts[1].strip()}
+                    )
 
     # Days since last commit
     try:
@@ -138,7 +150,8 @@ def get_dir_info(path: Path) -> Dict[str, Any]:
         "last_modified_file": latest_file,
         "last_modified_date": (
             datetime.fromtimestamp(latest_mtime, tz=timezone.utc).isoformat()
-            if latest_mtime > 0 else None
+            if latest_mtime > 0
+            else None
         ),
     }
 

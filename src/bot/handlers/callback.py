@@ -1419,7 +1419,9 @@ async def handle_change_callback(
         )
 
     except Exception as e:
-        logger.error("Error handling change request", error=str(e), decision_id=decision_id)
+        logger.error(
+            "Error handling change request", error=str(e), decision_id=decision_id
+        )
         await query.edit_message_text(
             f"❌ <b>Error Processing Change Request</b>\n\n{escape_html(str(e))}",
             parse_mode="HTML",
@@ -1454,9 +1456,9 @@ def _trigger_approved_work(
     # Launch claude -p in background subprocess
     cmd = (
         f'cd "{project_dir}" && unset CLAUDECODE && '
-        f'claude -p {_shell_quote(prompt)} '
+        f"claude -p {_shell_quote(prompt)} "
         f'--allowedTools "{CLAUDE_TOOLS}" '
-        f'--output-format json '
+        f"--output-format json "
         f'> "{output_file}" 2>&1'
     )
 

@@ -81,7 +81,7 @@ def _extract_tasks(filepath: Path) -> List[Dict[str, Any]]:
 
 def _resolve_project_link(raw: str) -> str:
     """Extract project name from Obsidian link like '[[Moral Code]]'."""
-    match = re.match(r'\[\[(.+?)]]', raw.strip('" '))
+    match = re.match(r"\[\[(.+?)]]", raw.strip('" '))
     return match.group(1) if match else raw.strip('" ')
 
 
@@ -106,21 +106,25 @@ def gather_obsidian_projects() -> List[Dict[str, Any]]:
         confidence = meta.get("confidence", 0) or 0
         effort = meta.get("effort", 1) or 1
 
-        priority = round((interest * 2 + impact + earnings_plan + confidence) / effort, 1)
+        priority = round(
+            (interest * 2 + impact + earnings_plan + confidence) / effort, 1
+        )
 
-        projects.append({
-            "name": f.stem,
-            "status": meta.get("status", "unknown"),
-            "domain": meta.get("domain", ""),
-            "why": meta.get("why", ""),
-            "next_action": meta.get("next_action", ""),
-            "interest": interest,
-            "impact": impact,
-            "earnings_plan": earnings_plan,
-            "confidence": confidence,
-            "effort": effort,
-            "priority": priority,
-        })
+        projects.append(
+            {
+                "name": f.stem,
+                "status": meta.get("status", "unknown"),
+                "domain": meta.get("domain", ""),
+                "why": meta.get("why", ""),
+                "next_action": meta.get("next_action", ""),
+                "interest": interest,
+                "impact": impact,
+                "earnings_plan": earnings_plan,
+                "confidence": confidence,
+                "effort": effort,
+                "priority": priority,
+            }
+        )
 
     return sorted(projects, key=lambda p: p["priority"], reverse=True)
 
@@ -147,14 +151,16 @@ def gather_obsidian_goals() -> List[Dict[str, Any]]:
         if not open_tasks:
             continue  # skip completed goals
 
-        goals.append({
-            "name": f.stem,
-            "project": project_name,
-            "status": meta.get("status", "not started"),
-            "importance": meta.get("importance", 0) or 0,
-            "complexity": meta.get("complexity", 0) or 0,
-            "tasks": open_tasks,
-        })
+        goals.append(
+            {
+                "name": f.stem,
+                "project": project_name,
+                "status": meta.get("status", "not started"),
+                "importance": meta.get("importance", 0) or 0,
+                "complexity": meta.get("complexity", 0) or 0,
+                "tasks": open_tasks,
+            }
+        )
 
     return goals
 
@@ -169,14 +175,20 @@ async def gather_calendar_events() -> str:
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            "gws", "calendar", "events", "list",
-            "--params", json.dumps({
-                "calendarId": "primary",
-                "timeMin": today,
-                "timeMax": tomorrow,
-                "singleEvents": True,
-                "orderBy": "startTime",
-            }),
+            "gws",
+            "calendar",
+            "events",
+            "list",
+            "--params",
+            json.dumps(
+                {
+                    "calendarId": "primary",
+                    "timeMin": today,
+                    "timeMax": tomorrow,
+                    "singleEvents": True,
+                    "orderBy": "startTime",
+                }
+            ),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -277,9 +289,13 @@ async def build_heartbeat_prompt() -> str:
 
     # Sort goals by project priority * goal importance, format with tasks
     for g in obsidian_goals:
-        g["effective_priority"] = project_priority.get(g["project"], 0) * g["importance"]
+        g["effective_priority"] = (
+            project_priority.get(g["project"], 0) * g["importance"]
+        )
 
-    sorted_goals = sorted(obsidian_goals, key=lambda g: g["effective_priority"], reverse=True)
+    sorted_goals = sorted(
+        obsidian_goals, key=lambda g: g["effective_priority"], reverse=True
+    )
 
     goal_lines = []
     for g in sorted_goals:
@@ -371,9 +387,13 @@ def build_weekly_review_prompt() -> str:
     obsidian_data = "\n".join(obsidian_lines) if obsidian_lines else "(no scores yet)"
 
     for g in obsidian_goals:
-        g["effective_priority"] = project_priority.get(g["project"], 0) * g["importance"]
+        g["effective_priority"] = (
+            project_priority.get(g["project"], 0) * g["importance"]
+        )
 
-    sorted_goals = sorted(obsidian_goals, key=lambda g: g["effective_priority"], reverse=True)
+    sorted_goals = sorted(
+        obsidian_goals, key=lambda g: g["effective_priority"], reverse=True
+    )
 
     goal_lines = []
     for g in sorted_goals:

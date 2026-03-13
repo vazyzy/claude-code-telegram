@@ -83,9 +83,7 @@ class ClaudeIntegration:
                         user_id
                     )
                 except Exception as mem_err:
-                    logger.warning(
-                        "Failed to build memory prompt", error=str(mem_err)
-                    )
+                    logger.warning("Failed to build memory prompt", error=str(mem_err))
 
             # Continue session if we have an existing session with a real ID
             is_new = getattr(session, "is_new_session", False)
@@ -136,13 +134,9 @@ class ClaudeIntegration:
             # Process memory updates from response
             if self.memory_service and response.content:
                 try:
-                    updates = self.memory_service.parse_memory_updates(
-                        response.content
-                    )
+                    updates = self.memory_service.parse_memory_updates(response.content)
                     if updates:
-                        await self.memory_service.apply_memory_updates(
-                            user_id, updates
-                        )
+                        await self.memory_service.apply_memory_updates(user_id, updates)
                         response.content = self.memory_service.strip_memory_block(
                             response.content
                         )

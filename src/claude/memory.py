@@ -15,9 +15,7 @@ from ..storage.repositories import UserMemoryRepository
 
 logger = structlog.get_logger()
 
-MEMORY_UPDATE_PATTERN = re.compile(
-    r"<memory_update>(.*?)</memory_update>", re.DOTALL
-)
+MEMORY_UPDATE_PATTERN = re.compile(r"<memory_update>(.*?)</memory_update>", re.DOTALL)
 
 MEMORY_INSTRUCTIONS = (
     "If you learn new important facts about the user, or they ask you to "
@@ -70,9 +68,7 @@ class UserMemoryService:
         memory_block = "<user_memory>\n" + "\n\n".join(sections) + "\n</user_memory>"
         return memory_block + "\n\n" + MEMORY_INSTRUCTIONS
 
-    def parse_memory_updates(
-        self, response_text: str
-    ) -> Optional[Dict[str, Any]]:
+    def parse_memory_updates(self, response_text: str) -> Optional[Dict[str, Any]]:
         """Parse <memory_update> JSON block from response."""
         match = MEMORY_UPDATE_PATTERN.search(response_text)
         if not match:
@@ -84,9 +80,7 @@ class UserMemoryService:
             logger.warning("Failed to parse memory update", error=str(e))
             return None
 
-    async def apply_memory_updates(
-        self, user_id: int, updates: Dict[str, Any]
-    ) -> None:
+    async def apply_memory_updates(self, user_id: int, updates: Dict[str, Any]) -> None:
         """Apply parsed memory updates (set/delete)."""
         set_entries = updates.get("set", [])
         delete_keys = updates.get("delete", [])
@@ -114,9 +108,7 @@ class UserMemoryService:
 
         # Enforce max facts limit
         if set_entries:
-            await self.memory_repo.delete_oldest_facts(
-                user_id, self.max_facts
-            )
+            await self.memory_repo.delete_oldest_facts(user_id, self.max_facts)
 
     def strip_memory_block(self, response_text: str) -> str:
         """Remove <memory_update> block from user-visible response."""

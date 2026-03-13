@@ -12,7 +12,6 @@ import asyncio
 import sqlite3
 from pathlib import Path
 
-
 DEFAULT_CRON = "0 9 * * *"  # 9 AM daily
 JOB_NAME = "project-heartbeat"
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "bot.db"
@@ -23,11 +22,11 @@ def register_heartbeat_job(chat_id: int, cron: str = DEFAULT_CRON) -> None:
     # The prompt tells Claude to run the heartbeat gather script
     # and interpret the results
     prompt = (
-        "Run `python3 -c \""
+        'Run `python3 -c "'
         "import sys; sys.path.insert(0, '.'); "
         "from src.heartbeat.prompt import build_heartbeat_prompt; "
         "print(build_heartbeat_prompt())"
-        "\"` in the bot directory to get current project data, "
+        '"` in the bot directory to get current project data, '
         "then follow the instructions in the output to write the daily message."
     )
 
@@ -70,7 +69,7 @@ def register_heartbeat_job(chat_id: int, cron: str = DEFAULT_CRON) -> None:
                 prompt,
                 str(chat_id),
                 str(Path(__file__).parent.parent.parent),
-                ),
+            ),
         )
         conn.commit()
         print(f"Heartbeat job registered: cron='{cron}', chat_id={chat_id}")
@@ -82,7 +81,11 @@ def register_heartbeat_job(chat_id: int, cron: str = DEFAULT_CRON) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Register heartbeat scheduled job")
     parser.add_argument("--chat-id", type=int, required=True, help="Telegram chat ID")
-    parser.add_argument("--cron", default=DEFAULT_CRON, help=f"Cron expression (default: {DEFAULT_CRON})")
+    parser.add_argument(
+        "--cron",
+        default=DEFAULT_CRON,
+        help=f"Cron expression (default: {DEFAULT_CRON})",
+    )
     args = parser.parse_args()
 
     register_heartbeat_job(args.chat_id, args.cron)
