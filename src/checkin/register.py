@@ -12,7 +12,7 @@ from datetime import date
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "bot.db"
-OBSIDIAN_DAILY = "/home/vazyzy/projects/obsidian/Health/Daily"
+OBSIDIAN_DAILY = "/home/vazyzy/projects/obsidian/daily-log"
 
 MORNING_PROMPT = f"""Morning mental health check-in. Today is {{TODAY}}.
 
@@ -58,7 +58,7 @@ type: health-checkin
 | Medications taken | <answer> |
 
 Then run:
-git -C /home/vazyzy/projects/obsidian -c user.name="Claude Code" -c user.email="claude@anthropic.com" add Health/Daily/ && git -C /home/vazyzy/projects/obsidian -c user.name="Claude Code" -c user.email="claude@anthropic.com" commit -m "health check-in: {{TODAY}} morning" && git -C /home/vazyzy/projects/obsidian push
+git -C /home/vazyzy/projects/obsidian -c user.name="Claude Code" -c user.email="claude@anthropic.com" add daily-log/ && git -C /home/vazyzy/projects/obsidian -c user.name="Claude Code" -c user.email="claude@anthropic.com" commit -m "health check-in: {{TODAY}} morning" && git -C /home/vazyzy/projects/obsidian push
 """
 
 EVENING_PROMPT = f"""Evening mental health check-in. Today is {{TODAY}}.
@@ -97,7 +97,7 @@ If it exists, ADD a ## Evening section at the end. If not, create the file with 
 | Event note | <answer or —> |
 
 Then run:
-git -C /home/vazyzy/projects/obsidian -c user.name="Claude Code" -c user.email="claude@anthropic.com" add Health/Daily/ && git -C /home/vazyzy/projects/obsidian -c user.name="Claude Code" -c user.email="claude@anthropic.com" commit -m "health check-in: {{TODAY}} evening" && git -C /home/vazyzy/projects/obsidian push
+git -C /home/vazyzy/projects/obsidian -c user.name="Claude Code" -c user.email="claude@anthropic.com" add daily-log/ && git -C /home/vazyzy/projects/obsidian -c user.name="Claude Code" -c user.email="claude@anthropic.com" commit -m "health check-in: {{TODAY}} evening" && git -C /home/vazyzy/projects/obsidian push
 """
 
 
