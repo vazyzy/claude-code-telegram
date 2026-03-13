@@ -11,6 +11,9 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+# Directory shared with the MCP ask_user_via_telegram tool for answer exchange.
+_ASK_MCP_PENDING_DIR = Path.home() / ".claude" / "ask-user"
+
 import structlog
 from telegram import (
     BotCommand,
@@ -76,6 +79,46 @@ async def _handle_ask_user_callback(
         try:
             await query.message.edit_text(
                 f"{query.message.text}\n\n✅ <b>{choice_label}</b>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+
+async def _handle_ask_mcp_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle inline keyboard responses for ask_user_via_telegram MCP tool.
+
+    Callback data format: ``askmcp:<question_id>:<option_label>``
+
+    Writes the chosen label to ``~/.claude/ask-user/<question_id>`` so the
+    MCP tool's polling loop can pick it up.
+    """
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+
+    parts = query.data.split(":", 2)
+    if len(parts) != 3:
+        return
+
+    _, question_id, chosen_label = parts
+
+    # Write the answer file so the MCP tool's polling loop picks it up.
+    try:
+        _ASK_MCP_PENDING_DIR.mkdir(parents=True, exist_ok=True)
+        answer_file = _ASK_MCP_PENDING_DIR / question_id
+        answer_file.write_text(chosen_label)
+    except OSError as exc:
+        logger.warning("Failed to write ask_user answer file", error=str(exc))
+
+    # Update the Telegram message to show what was chosen.
+    if query.message:
+        try:
+            await query.message.edit_text(
+                f"{query.message.text}\n\n✅ <b>{chosen_label}</b>",
                 parse_mode="HTML",
             )
         except Exception:
@@ -466,6 +509,14 @@ class MessageOrchestrator:
             )
         )
 
+        # ask_user_via_telegram MCP tool callbacks (no deps needed)
+        app.add_handler(
+            CallbackQueryHandler(
+                _handle_ask_mcp_callback,
+                pattern=r"^askmcp:",
+            )
+        )
+
         # Only cd: callbacks (for project selection), scoped by pattern
         app.add_handler(
             CallbackQueryHandler(
@@ -530,6 +581,14 @@ class MessageOrchestrator:
         )
         app.add_handler(
             CallbackQueryHandler(self._inject_deps(callback.handle_callback_query))
+        )
+
+        # ask_user_via_telegram MCP tool callbacks (no deps needed, lower priority)
+        app.add_handler(
+            CallbackQueryHandler(
+                _handle_ask_mcp_callback,
+                pattern=r"^askmcp:",
+            )
         )
 
         logger.info("Classic handlers registered (13 commands + full handler set)")
