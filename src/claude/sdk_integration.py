@@ -218,8 +218,18 @@ class ClaudeSDKManager:
                 sdk_allowed_tools = self.config.claude_allowed_tools
                 sdk_disallowed_tools = self.config.claude_disallowed_tools
 
+            # Build a clean env that strips nesting-detection vars so the
+            # child Claude CLI doesn't refuse to start when the bot itself
+            # is launched from inside a Claude Code session.
+            clean_env = {
+                k: v
+                for k, v in os.environ.items()
+                if k not in {"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"}
+            }
+
             # Build Claude Agent options
             options = ClaudeAgentOptions(
+                env=clean_env,
                 model=self.config.claude_model or None,
                 max_turns=self.config.claude_max_turns,
                 max_budget_usd=self.config.claude_max_cost_per_request,
@@ -538,13 +548,29 @@ class ClaudeSDKManager:
         """Load MCP server configuration from a JSON file.
 
         The new claude-agent-sdk expects mcp_servers as a dict, not a file path.
+        Supports ``${VAR}`` expansion from environment variables in string values.
         """
         import json
+        import re
+
+        def _expand_env(value: Any) -> Any:
+            """Recursively expand ${VAR} references in string values."""
+            if isinstance(value, str):
+                return re.sub(
+                    r"\$\{(\w+)\}",
+                    lambda m: os.environ.get(m.group(1), m.group(0)),
+                    value,
+                )
+            if isinstance(value, dict):
+                return {k: _expand_env(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [_expand_env(item) for item in value]
+            return value
 
         try:
             with open(config_path) as f:
                 config_data = json.load(f)
-            return config_data.get("mcpServers", {})
+            return _expand_env(config_data.get("mcpServers", {}))
         except (json.JSONDecodeError, OSError) as e:
             logger.error(
                 "Failed to load MCP config", path=str(config_path), error=str(e)
