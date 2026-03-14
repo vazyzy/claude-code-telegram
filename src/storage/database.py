@@ -17,6 +17,8 @@ from typing import AsyncIterator, List, Tuple
 import aiosqlite
 import structlog
 
+from src.reminders.migrations import MIGRATION_V6
+
 logger = structlog.get_logger()
 
 
@@ -330,6 +332,7 @@ class DatabaseManager:
                     ON user_memory(user_id);
                 """,
             ),
+            (6, MIGRATION_V6),
         ]
 
     async def _init_pool(self):
