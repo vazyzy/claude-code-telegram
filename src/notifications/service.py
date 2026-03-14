@@ -131,6 +131,26 @@ class NotificationService:
                 event_id=event.id,
             )
 
+    async def send_message(self, chat_id: int, text: str) -> None:
+        """Send a plain-text message directly to a Telegram chat.
+
+        Used by NightlyPlanner (and other internal callers) to deliver
+        failure alerts without going through the event bus.
+        Swallows TelegramError so callers are never blocked.
+        """
+        try:
+            chunks = self._split_message(text)
+            for chunk in chunks:
+                await self.bot.send_message(chat_id=chat_id, text=chunk)
+                if len(chunks) > 1:
+                    import asyncio
+                    await asyncio.sleep(SEND_INTERVAL_SECONDS)
+            logger.info("direct_message_sent", chat_id=chat_id, text_length=len(text))
+        except TelegramError as exc:
+            logger.error(
+                "direct_message_failed", chat_id=chat_id, error=str(exc)
+            )
+
     def _split_message(self, text: str, max_length: int = 4096) -> List[str]:
         """Split long messages at paragraph boundaries."""
         if len(text) <= max_length:
