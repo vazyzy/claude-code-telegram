@@ -49,6 +49,58 @@ _LLM_TIMEOUT_SECONDS: int = 120
 # Keeps large personal files from being sent to the Anthropic API wholesale.
 _LIFESTYLE_MAX_CHARS: int = 2_000
 
+# Starter template sent to the user during cold-start onboarding when
+# lifestyle.md is absent.  Mirrors the schema defined in specs/20-product/schemas.md.
+_LIFESTYLE_TEMPLATE = """\
+# My Lifestyle
+
+> This file is read by your AI personal assistant to make smarter reminder decisions.
+> Update it when your routines change. All sections are optional but more = smarter.
+
+## Sleep Schedule
+
+- Usually asleep by: 11pm
+- Wake up: 7am
+- Deep work hours: (e.g. 9am–12pm — avoid scheduling calls)
+
+## Regular Commitments
+
+- (e.g. Gym: Mon/Wed/Fri 7–8am)
+- (e.g. Haircut: every 3 weeks, ~45 min)
+- (e.g. Weekly team call: Tuesday 10am)
+
+## Calls Policy
+
+- OK during: (e.g. commute, haircut, light errands)
+- Not OK during: (e.g. gym, meals, focused work blocks)
+
+## Do Not Disturb Conditions
+
+- (e.g. When I'm in a meeting — check calendar)
+- (e.g. After 10pm unless critical)
+- (e.g. Before 8am)
+
+## Health & Energy Patterns
+
+- (e.g. Low energy after lunch — avoid scheduling hard tasks 1–3pm)
+- (e.g. Best focus in the morning)
+
+## Travel & Location
+
+- Base: Bangkok, UTC+7
+- (e.g. Travel frequently — always check if I have a flight before scheduling)
+
+## Things I Often Forget
+
+- (e.g. Replying to messages after meetings)
+- (e.g. Preparing documents the day before important calls)
+
+## Things I Never Need Reminders About
+
+- (e.g. Daily gym — I go automatically, don't remind me)
+- (e.g. Meals — I handle these myself)
+"""
+
 # ---------------------------------------------------------------------------
 # Module-level constants
 # ---------------------------------------------------------------------------
@@ -239,6 +291,12 @@ class NightlyPlanner:
         log.info("reminders.planner.run_start", model=self._model)
 
         try:
+            # Step 0: cold-start onboarding -- offer lifestyle.md template on
+            # the very first run before doing any expensive calendar work.
+            async with self.db.get_connection() as conn:
+                if await self._is_first_run(conn):
+                    await self._check_cold_start()
+
             # Step 1: validate Google auth before doing any expensive work
             await self.calendar.validate_auth()
 
@@ -752,6 +810,66 @@ class NightlyPlanner:
 
         await conn.commit()
         return inserted
+
+    # ------------------------------------------------------------------
+    # Cold-start onboarding
+    # ------------------------------------------------------------------
+
+    async def _is_first_run(self, conn: Any) -> bool:
+        """Return True if no 'planned' entries exist in planner_log.
+
+        A fresh installation has an empty planner_log table.  Once at least
+        one reminder has been planned the table will contain a 'planned' row,
+        and we consider onboarding complete.
+        """
+        cursor = await conn.execute(
+            "SELECT 1 FROM planner_log WHERE action = 'planned' LIMIT 1"
+        )
+        row = await cursor.fetchone()
+        return row is None
+
+    async def _check_cold_start(self) -> None:
+        """On the first nightly run, offer a lifestyle.md template if the file is missing.
+
+        Sends a Telegram message with Yes/Not-now inline buttons.  The
+        callback handler ``handle_onboarding_callback`` in commands.py
+        responds to the user's choice.  If lifestyle.md already exists (or
+        the path is not configured), this method is a no-op.
+        """
+        lifestyle_path: Optional[Path] = self.config._lifestyle_path
+        if lifestyle_path is None or lifestyle_path.exists():
+            # Path not configured, or file already present -- nothing to do.
+            return
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "Yes, send me the template",
+                        callback_data="reminder_onboarding:send_template",
+                    ),
+                    InlineKeyboardButton(
+                        "Not now",
+                        callback_data="reminder_onboarding:skip",
+                    ),
+                ]
+            ]
+        )
+        await self.bot.send_message(
+            chat_id=self.target_chat_id,
+            text=(
+                "Welcome to Smart Reminders!\n\n"
+                "I notice you don't have a lifestyle.md file yet. "
+                "This file helps me understand your preferences and schedule "
+                "reminders intelligently.\n\n"
+                "Would you like me to send you a template to get started?"
+            ),
+            reply_markup=keyboard,
+        )
+        logger.info(
+            "reminders.planner.cold_start_onboarding_sent",
+            lifestyle_path=str(lifestyle_path),
+        )
 
     # ------------------------------------------------------------------
     # Internal utilities

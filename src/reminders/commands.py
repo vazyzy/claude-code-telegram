@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timedelta, timezone
+from pathlib import Path
 from typing import List, Optional
 
 import structlog
@@ -31,13 +32,8 @@ ORDER BY trigger_day ASC, scheduled_time ASC
 """
 
 
-def _noop() -> Optional[str]:
-    """Keep Optional imported; resolved by type annotation usage below."""
-    return None
-
-
 class RemindersCommandHandler:
-    """Handles /reminders command and reminder_cancel: callbacks."""
+    """Handles /reminders command, reminder_cancel: callbacks, and onboarding."""
 
     def __init__(self, db: DatabaseManager, target_chat_id: int) -> None:
         self.db = db
@@ -74,7 +70,6 @@ class RemindersCommandHandler:
         for reminder in reminders:
             urgency_emoji = _URGENCY_EMOJI.get(reminder.urgency, "🟡")
 
-            time_str: str
             if reminder.scheduled_time is not None:
                 # Convert UTC-aware datetime to UTC+7 for display
                 local_time = reminder.scheduled_time.astimezone(UTC7)
@@ -98,6 +93,7 @@ class RemindersCommandHandler:
 
         text = "\n\n".join(lines)
         reply_markup = InlineKeyboardMarkup(keyboard_rows)
+
         await update.message.reply_text(text, reply_markup=reply_markup)
 
     async def handle_reminder_cancel_callback(
@@ -123,10 +119,57 @@ class RemindersCommandHandler:
                 reminder_id=reminder_id,
                 error=str(exc),
             )
-            await query.edit_message_text(
-                "Failed to cancel reminder. Please try again."
-            )
+            await query.edit_message_text("Failed to cancel reminder. Please try again.")
             return
 
         logger.info("reminders.commands.cancelled", reminder_id=reminder_id)
         await query.edit_message_text("Reminder cancelled.")
+
+    async def handle_onboarding_callback(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        lifestyle_path: Optional[Path] = None,
+    ) -> None:
+        """Handle reminder_onboarding:send_template and reminder_onboarding:skip callbacks.
+
+        When the user taps "Yes, send me the template":
+          - Send the lifestyle.md template as a code block message.
+          - Remove the inline keyboard from the original offer message.
+
+        When the user taps "Not now":
+          - Acknowledge silently and remove the keyboard.
+        """
+        from src.reminders.planner import _LIFESTYLE_TEMPLATE
+
+        query = update.callback_query
+        await query.answer()
+
+        action = query.data.split(":", 1)[1] if ":" in (query.data or "") else ""
+
+        if action == "send_template":
+            path_hint = str(lifestyle_path) if lifestyle_path else "lifestyle.md"
+            template_msg = (
+                f"Here is your lifestyle.md template \u2014 save it to `{path_hint}`:\n\n"
+                "```\n" + _LIFESTYLE_TEMPLATE + "\n```"
+            )
+            await query.message.reply_text(
+                template_msg,
+                parse_mode="Markdown",
+            )
+            logger.info(
+                "reminders.commands.onboarding_template_sent",
+                lifestyle_path=path_hint,
+            )
+        else:
+            # "skip" or any unknown action -- acknowledge silently
+            logger.info("reminders.commands.onboarding_skipped")
+
+        # Remove the inline keyboard from the offer message in all cases
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "reminders.commands.onboarding_keyboard_remove_failed",
+                error=str(exc),
+            )
