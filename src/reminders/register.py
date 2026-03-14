@@ -13,6 +13,7 @@ from src.reminders.calendar_client import GoogleCalendarClient
 from src.reminders.commands import RemindersCommandHandler
 from src.reminders.config import ReminderConfig
 from src.reminders.delivery import ReminderDelivery
+from src.reminders.obsidian import ObsidianScanner
 from src.reminders.planner import NightlyPlanner
 from src.reminders.renderer import LLMRenderer
 from src.reminders.scheduler import ReminderScheduler
@@ -91,7 +92,14 @@ def register_reminders(
         config=reminder_config,
     )
 
-    # 8. NightlyPlanner — runs once per night to fetch events and plan reminders via LLM
+    # 8a. ObsidianScanner — optional, only created when vault path is configured (T-014)
+    obsidian_scanner: Optional[ObsidianScanner] = None
+    vault_path: Optional[str] = getattr(config, "obsidian_vault_path", None)
+    if vault_path:
+        obsidian_scanner = ObsidianScanner(vault_path=vault_path)
+        logger.info("reminders.register.obsidian_scanner_created", vault_path=vault_path)
+
+    # 8b. NightlyPlanner — runs once per night to fetch events and plan reminders via LLM
     planner = NightlyPlanner(
         db=db,
         calendar=calendar,
@@ -101,6 +109,7 @@ def register_reminders(
         anthropic_client=anthropic_client,
         target_chat_id=config.reminder_target_chat_id,
         scheduler=scheduler,
+        obsidian_scanner=obsidian_scanner,
     )
 
     # Register job 1: nightly planner at 16:00 UTC (= 23:00 UTC+7)
