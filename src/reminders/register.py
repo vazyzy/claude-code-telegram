@@ -17,6 +17,7 @@ from src.reminders.obsidian import ObsidianScanner
 from src.reminders.planner import NightlyPlanner
 from src.reminders.renderer import LLMRenderer
 from src.reminders.scheduler import ReminderScheduler
+from src.reminders.suppression import SuppressionService
 
 logger = structlog.get_logger()
 
@@ -65,9 +66,8 @@ def register_reminders(
         calendar_id=config.google_calendar_id,
     )
 
-    # 3. SuppressionService — suppression.py is a stub in this version;
-    #    pass None so NightlyPlanner falls back to its defensive hasattr guard.
-    suppression = None  # TODO: replace once SuppressionService is implemented
+    # 3. SuppressionService — manages topic-based suppression rules (T-017)
+    suppression = SuppressionService(db=db)
 
     # 4. Shared Anthropic client — reads ANTHROPIC_API_KEY from environment automatically
     anthropic_client = anthropic.AsyncAnthropic()
@@ -135,7 +135,7 @@ def register_reminders(
         nightly_planner_cron="16:00 UTC",
         delivery_poll_interval_seconds=60,
         target_chat_id=config.reminder_target_chat_id,
-        suppression_active=False,
+        suppression_active=True,
     )
 
     # 9. RemindersCommandHandler — provides /reminders Telegram command + cancel callback
