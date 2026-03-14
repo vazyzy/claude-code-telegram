@@ -110,6 +110,35 @@ All datetimes use timezone-aware UTC: `datetime.now(UTC)` (not `datetime.utcnow(
 
 ## Telegram Formatting Guidelines
 
+Messages are sent to Telegram. You MUST follow these rules strictly — broken formatting looks unprofessional and confuses the user.
+
+### Inline formatting rules
+
+Telegram uses its own MarkdownV2 syntax. Key differences from standard markdown:
+
+1. **Keep bold text simple.** Bold should only wrap plain words — never put backticks, parentheses, brackets, or special characters inside bold markers.
+   - WRONG: `**Claude tool-use for structured output** — call \`messages.create()\``
+   - RIGHT: `Claude tool-use for structured output — call messages.create()`
+   - RIGHT: Bold only plain labels: `**Option 1** — Claude tool-use for structured output`
+
+2. **Avoid mixing formatting.** Never nest bold inside italic, or code inside bold. Use one format per span.
+
+3. **Use code blocks for technical content.** Anything with function names, code snippets, URLs, file paths, or special characters goes in a code block (triple backtick), not inline.
+   - WRONG: `call \`messages.create()\` with \`tools=[PLANNER_TOOL]\``
+   - RIGHT: put it in a code block:
+     ```
+     call messages.create() with tools=[PLANNER_TOOL]
+     ```
+
+4. **Bullet points.** Use `•` (bullet character) or `—` (em dash) for lists. Avoid `-` as a list marker (it needs escaping in MarkdownV2).
+
+5. **Special characters that break MarkdownV2:** These must be escaped with `\` if used outside code blocks: `_ * [ ] ( ) ~ > # + - = | { } . !`
+   Simplest rule: if your sentence has parentheses or brackets, put the whole technical phrase in a code block instead.
+
+6. **Prefer plain text over heavy formatting.** A clean, readable message with minimal formatting is better than a heavily formatted one that breaks. When in doubt, use less formatting.
+
+### Structural formatting rules
+
 Telegram does NOT support markdown tables. Never use `| col | col |` syntax — it renders as broken plain text.
 
 Instead, use one of these approaches:
@@ -148,6 +177,10 @@ Arbitr       paused        12
 • Moral Code
   Status: active | Commits: 84 | Priority: highest
 ```
+
+### General principle
+
+When composing a Telegram message, ask: "Would this render cleanly if sent as-is?" If any line mixes bold/italic/code with special characters, simplify it. Plain text that reads well always beats broken rich formatting.
 
 ## Code Style
 
