@@ -37,7 +37,7 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
 
 
 def register(chat_id: int,
-             morning_cron: str = "5 3 * * *",
+             morning_cron: str = "30 2 * * *",
              evening_cron: str = "0 15 * * *") -> None:
     """Insert/update morning and evening check-in jobs."""
     bot_dir = str(Path(__file__).parent.parent.parent)
@@ -69,8 +69,8 @@ def register(chat_id: int,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Register daily check-in jobs")
     parser.add_argument("--chat-id", type=int, default=163907541)
-    parser.add_argument("--morning-cron", default="5 3 * * *",
-                        help="Morning cron (UTC). Default: 5 3 * * * = 10:05 AM Bangkok")
+    parser.add_argument("--morning-cron", default="30 2 * * *",
+                        help="Morning cron (UTC). Default: 30 2 * * * = 9:30 AM Bangkok")
     parser.add_argument("--evening-cron", default="0 15 * * *",
                         help="Evening cron (UTC). Default: 0 15 * * * = 10:00 PM Bangkok")
     args = parser.parse_args()
