@@ -24,7 +24,7 @@ def _parse_dt(v: object) -> Optional[datetime]:
     - Already a datetime (sqlite3 PARSE_DECLTYPES converter active) -> returned as-is
     - ISO-format string -> parsed via fromisoformat
     """
-    if not v:
+    if v is None:
         return None
     if isinstance(v, datetime):
         return v
