@@ -34,7 +34,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.reminders.calendar_client import GoogleAuthError
 from src.reminders.config import ReminderConfig
-from src.reminders.models import CalendarEvent, PlannerLogEntry, ReminderRecord
+from src.reminders.models import CalendarEvent, ObsidianTask, PlannerLogEntry, ReminderRecord
+from src.reminders.obsidian import ObsidianScanner
 from src.storage.database import DatabaseManager
 
 logger = structlog.get_logger()
@@ -242,6 +243,10 @@ class NightlyPlanner:
     scheduler:
         APScheduler AsyncIOScheduler.  When set, a GoogleAuthError triggers a
         one-shot retry job 5 minutes later before notifying the user.
+    obsidian_scanner:
+        Optional ObsidianScanner instance.  When set, vault tasks with due
+        dates are fetched in parallel with calendar events and included in the
+        planning prompt (T-014).
     model:
         Claude model ID.  Defaults to claude-opus-4-5 for planning quality.
     """
@@ -256,6 +261,7 @@ class NightlyPlanner:
         anthropic_client: anthropic.AsyncAnthropic,
         target_chat_id: int,
         scheduler: Optional[Any] = None,
+        obsidian_scanner: Optional[ObsidianScanner] = None,
         model: str = "claude-opus-4-5",
     ) -> None:
         self.db = db
@@ -266,6 +272,7 @@ class NightlyPlanner:
         self._client = anthropic_client
         self.target_chat_id = target_chat_id
         self.scheduler = scheduler
+        self._obsidian = obsidian_scanner
         self._model = model
 
     # ------------------------------------------------------------------
@@ -301,8 +308,19 @@ class NightlyPlanner:
             await self.calendar.validate_auth()
 
             # Step 2: fetch data in parallel where possible
+            # Kick off Obsidian task scan concurrently with calendar fetch (T-014)
+            async def _no_tasks() -> list[ObsidianTask]:
+                return []
+
+            obsidian_future: asyncio.Task[list[ObsidianTask]] = asyncio.create_task(
+                self._obsidian.extract_tasks() if self._obsidian is not None
+                else _no_tasks()
+            )
             events: list[CalendarEvent] = await self.calendar.fetch_events(days_ahead=7)
             log.info("reminders.planner.events_fetched", count=len(events))
+
+            tasks: list[ObsidianTask] = await obsidian_future
+            log.info("reminders.planner.obsidian_tasks_fetched", count=len(tasks))
 
             # Suppression rules — SuppressionService may be a stub; guard for missing method
             suppressions: list[Any] = []
@@ -313,10 +331,9 @@ class NightlyPlanner:
             patterns = self.config.load_comms_patterns()
 
             # Step 3: build the planning prompt
-            # tasks=[] until T-014 adds Obsidian integration
             prompt = await self._build_planning_prompt(
                 events=events,
-                tasks=[],
+                tasks=tasks,
                 lifestyle=lifestyle,
                 suppressions=suppressions,
                 patterns=patterns,
@@ -461,7 +478,7 @@ class NightlyPlanner:
         events:
             CalendarEvent list for the next 7 days.
         tasks:
-            Obsidian task list (empty until T-014 lands).
+            Obsidian task list extracted by ObsidianScanner (T-014).
         lifestyle:
             Content of lifestyle.md (may be empty).
         suppressions:
@@ -506,6 +523,21 @@ class NightlyPlanner:
         else:
             events_section = "(no events in next 7 days)"
 
+        # --- Obsidian Tasks section ---
+        if tasks:
+            task_lines: list[str] = []
+            for t in tasks:
+                safe_text = _sanitize(t.text, 150)
+                line = f"- {safe_text}"
+                if t.due_date:
+                    overdue_flag = " [OVERDUE]" if t.overdue else ""
+                    line += f" (due: {t.due_date}{overdue_flag})"
+                line += f" [{_sanitize(t.file_path, 80)}:{t.line_number}]"
+                task_lines.append(line)
+            tasks_section = "\n".join(task_lines)
+        else:
+            tasks_section = "(no tasks found in vault)"
+
         # --- Lifestyle section ---
         lifestyle_section = lifestyle.strip() or "(none provided)"
         if len(lifestyle_section) > _LIFESTYLE_MAX_CHARS:
@@ -546,6 +578,9 @@ class NightlyPlanner:
             "## Calendar Events",
             events_section,
             "",
+            "## Obsidian Tasks",
+            tasks_section,
+            "",
             "## Lifestyle Context",
             lifestyle_section,
             "",
@@ -557,12 +592,14 @@ class NightlyPlanner:
             f"Critical categories: {cats_str}",
             "",
             "## Instructions",
-            "For each calendar event, decide whether reminders are needed. Create:",
-            '- A "primary" reminder: fires close to event time (30\u201360 min before by default)',
+            "For each calendar event and Obsidian task with a due date, decide whether reminders are needed. Create:",
+            '- A "primary" reminder: fires close to event/due time (30\u201360 min before by default)',
             (
-                '- An "advance_prep" reminder: fires 1\u20133 days before for events requiring '
-                "preparation (travel, medical, visa, etc.)"
+                '- An "advance_prep" reminder: fires 1\u20133 days before for events or tasks requiring '
+                "preparation (travel, medical, visa, deliverables, etc.)"
             ),
+            "For Obsidian tasks: use source_type=\"task\" and set source_event_id to the file path + line number (e.g. \"Projects/Work.md:42\").",
+            "Overdue tasks should get an immediate or near-future reminder with urgency=\"high\" unless suppressed.",
             "Skip reminders if the topic matches an active suppression rule.",
             (
                 'Urgency: use "critical" for events in critical categories, otherwise '
