@@ -8,6 +8,7 @@ classic mode, delegates to existing full-featured handlers.
 import asyncio
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -44,8 +45,8 @@ from .utils.image_extractor import (
 
 logger = structlog.get_logger()
 
-# Pending AskUserQuestion futures: chat_id -> asyncio.Future[dict[str, str]]
-_pending_ask_user: Dict[int, asyncio.Future] = {}  # type: ignore[type-arg]
+# Pending AskUserQuestion futures: unique_id -> asyncio.Future[str]
+_pending_ask_user: Dict[str, asyncio.Future] = {}  # type: ignore[type-arg]
 
 
 async def _handle_ask_user_callback(
@@ -53,34 +54,34 @@ async def _handle_ask_user_callback(
 ) -> None:
     """Handle inline keyboard responses for AskUserQuestion.
 
-    Callback data format: ``askq:<question_index>:<option_label>``
+    Callback data format: ``askq:<unique_id>:<option_label>``
     """
     query = update.callback_query
     if not query or not query.data:
         return
     await query.answer()
 
-    chat_id = getattr(query.message, "chat_id", None) if query.message else None
-    if not chat_id or chat_id not in _pending_ask_user:
-        return
-
     parts = query.data.split(":", 2)
     if len(parts) != 3:
         return
 
-    _, q_idx_str, choice_label = parts
+    _, unique_id, choice_label = parts
 
     # Resolve the future with the answer
-    future = _pending_ask_user.pop(chat_id, None)
+    future = _pending_ask_user.pop(unique_id, None)
     if future and not future.done():
-        future.set_result({q_idx_str: choice_label})
+        future.set_result(choice_label)
+    elif not future:
+        # Stale button from an already-answered question — ignore silently
+        logger.debug("Ignoring stale AskUserQuestion callback", unique_id=unique_id)
 
-    # Update the message to show what was chosen
+    # Update the message to show what was chosen and remove buttons
     if query.message:
         try:
             await query.message.edit_text(
                 f"{query.message.text}\n\n✅ <b>{choice_label}</b>",
                 parse_mode="HTML",
+                reply_markup=None,
             )
         except Exception:
             pass
@@ -132,6 +133,9 @@ def _make_ask_user_callback(chat: Any) -> Callable:
     Returns an async function that sends inline keyboard buttons for each
     AskUserQuestion question, waits for the user to tap one, and returns
     ``{question_text: chosen_label}`` mapping.
+
+    Each question gets a unique ID so multiple concurrent/sequential
+    AskUserQuestion calls never interfere with each other.
     """
 
     async def ask_user(tool_input: Dict[str, Any]) -> Dict[str, str]:
@@ -141,21 +145,25 @@ def _make_ask_user_callback(chat: Any) -> Callable:
 
         answers: Dict[str, str] = {}
 
-        for i, q in enumerate(questions):
+        for q in questions:
             question_text = q.get("question", "Choose an option:")
             options = q.get("options", [])
 
             if not options:
                 continue
 
+            # Unique ID per question — prevents cross-talk between questions
+            qid = uuid.uuid4().hex[:8]
+
             # Build inline keyboard — one button per option
             keyboard = []
             for opt in options:
                 label = opt.get("label", "?")
-                cb_data = f"askq:{i}:{label}"
+                cb_data = f"askq:{qid}:{label}"
                 # Telegram limits callback_data to 64 bytes
+                # qid=8 chars, "askq:"=5, ":"=1 → 14 overhead, 50 for label
                 if len(cb_data.encode()) > 64:
-                    cb_data = f"askq:{i}:{label[:40]}"
+                    cb_data = f"askq:{qid}:{label[:50]}"
                 keyboard.append([InlineKeyboardButton(label, callback_data=cb_data)])
 
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -172,26 +180,30 @@ def _make_ask_user_callback(chat: Any) -> Callable:
                 if desc:
                     display += f"\n• <b>{opt['label']}</b> — {desc}"
 
-            await chat.send_message(
+            sent_msg = await chat.send_message(
                 display, parse_mode="HTML", reply_markup=reply_markup
             )
 
             # Wait for user to tap a button (timeout 2 min)
             loop = asyncio.get_running_loop()
             future: asyncio.Future = loop.create_future()  # type: ignore[type-arg]
-            _pending_ask_user[chat.id] = future
+            _pending_ask_user[qid] = future
 
             try:
-                result = await asyncio.wait_for(future, timeout=120)
-                chosen = list(result.values())[0] if result else ""
+                chosen = await asyncio.wait_for(future, timeout=120)
                 answers[question_text] = chosen
             except asyncio.TimeoutError:
                 # Fall back to first option on timeout
-                answers[question_text] = options[0].get("label", "") if options else ""
-                _pending_ask_user.pop(chat.id, None)
-                # Edit message to show timeout
+                default = options[0].get("label", "") if options else ""
+                answers[question_text] = default
+                _pending_ask_user.pop(qid, None)
+                # Remove buttons and show timeout
                 try:
-                    await chat.send_message("⏰ No selection — using default.")
+                    await sent_msg.edit_text(
+                        f"{sent_msg.text}\n\n⏰ Timed out — using <b>{default}</b>",
+                        parse_mode="HTML",
+                        reply_markup=None,
+                    )
                 except Exception:
                     pass
 
@@ -1574,6 +1586,7 @@ class MessageOrchestrator:
             approved_directory=self.settings.approved_directory,
         )
 
+        ask_user_cb = _make_ask_user_callback(chat)
         heartbeat = self._start_typing_heartbeat(chat)
         try:
             claude_response = await claude_integration.run_command(
@@ -1583,6 +1596,7 @@ class MessageOrchestrator:
                 session_id=session_id,
                 on_stream=on_stream,
                 force_new=force_new,
+                ask_user_callback=ask_user_cb,
             )
         finally:
             heartbeat.cancel()
