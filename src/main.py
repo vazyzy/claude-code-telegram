@@ -298,14 +298,16 @@ async def run_application(app: Dict[str, Any]) -> None:
         notification_service.register()
         await notification_service.start()
 
-        # Wire reminder module (stub until T-010)
-        register_reminders(
+        # Wire reminder module — registers /reminders command handler and cancel callback
+        reminders_handler = register_reminders(
             scheduler=scheduler._scheduler if scheduler else None,
             db=storage.db_manager,
             notification=notification_service,
             bot=telegram_bot,
             config=config,
         )
+        if reminders_handler is not None:
+            bot.deps["reminders_handler"] = reminders_handler
 
         # Collect concurrent tasks
         tasks = []

@@ -127,6 +127,35 @@ async def _handle_ask_mcp_callback(
             pass
 
 
+async def _handle_reminders_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Delegate /reminders to RemindersCommandHandler stored in bot_data."""
+    handler = context.bot_data.get("reminders_handler")
+    if handler is None:
+        await update.message.reply_text(
+            "Reminders feature is not configured (REMINDER_TARGET_CHAT_ID not set)."
+        )
+        return
+    await handler.handle_reminders_command(update, context)
+
+
+async def _handle_reminder_cancel_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Delegate reminder_cancel: callback to RemindersCommandHandler stored in bot_data."""
+    handler = context.bot_data.get("reminders_handler")
+    if handler is None:
+        query = update.callback_query
+        if query:
+            await query.answer()
+            await query.edit_message_text(
+                "Reminders feature is not configured."
+            )
+        return
+    await handler.handle_reminder_cancel_callback(update, context)
+
+
 def _make_ask_user_callback(chat: Any) -> Callable:
     """Create an ask_user_callback bound to a Telegram chat.
 
@@ -549,6 +578,17 @@ class MessageOrchestrator:
             )
         )
 
+        # /reminders command + reminder_cancel: callback
+        app.add_handler(
+            CommandHandler("reminders", self._inject_deps(_handle_reminders_command))
+        )
+        app.add_handler(
+            CallbackQueryHandler(
+                self._inject_deps(_handle_reminder_cancel_callback),
+                pattern=r"^reminder_cancel:",
+            )
+        )
+
         logger.info("Agentic handlers registered")
 
     def _register_classic_handlers(self, app: Application) -> None:
@@ -610,6 +650,17 @@ class MessageOrchestrator:
             )
         )
 
+        # /reminders command + reminder_cancel: callback
+        app.add_handler(
+            CommandHandler("reminders", self._inject_deps(_handle_reminders_command))
+        )
+        app.add_handler(
+            CallbackQueryHandler(
+                self._inject_deps(_handle_reminder_cancel_callback),
+                pattern=r"^reminder_cancel:",
+            )
+        )
+
         logger.info("Classic handlers registered (13 commands + full handler set)")
 
     async def get_bot_commands(self) -> list:  # type: ignore[type-arg]
@@ -622,6 +673,7 @@ class MessageOrchestrator:
                 BotCommand("verbose", "Set output verbosity (0/1/2)"),
                 BotCommand("repo", "List repos / switch workspace"),
                 BotCommand("restart", "Restart the bot"),
+                BotCommand("reminders", "Show upcoming reminders (next 7 days)"),
             ]
             if self.settings.enable_project_threads:
                 commands.append(BotCommand("sync_threads", "Sync project topics"))
@@ -642,6 +694,7 @@ class MessageOrchestrator:
                 BotCommand("actions", "Show quick actions"),
                 BotCommand("git", "Git repository commands"),
                 BotCommand("restart", "Restart the bot"),
+                BotCommand("reminders", "Show upcoming reminders (next 7 days)"),
             ]
             if self.settings.enable_project_threads:
                 commands.append(BotCommand("sync_threads", "Sync project topics"))

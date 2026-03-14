@@ -10,6 +10,7 @@ from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-untyped
 from apscheduler.triggers.interval import IntervalTrigger  # type: ignore[import-untyped]
 
 from src.reminders.calendar_client import GoogleCalendarClient
+from src.reminders.commands import RemindersCommandHandler
 from src.reminders.config import ReminderConfig
 from src.reminders.delivery import ReminderDelivery
 from src.reminders.planner import NightlyPlanner
@@ -25,7 +26,7 @@ def register_reminders(
     notification,  # NotificationService
     bot,           # telegram.Bot
     config,        # Settings
-) -> None:
+) -> Optional[RemindersCommandHandler]:
     """Wire reminder module into the bot. Called from main.py after all services are initialized.
 
     Instantiates all reminder sub-components and registers two APScheduler jobs:
@@ -34,13 +35,22 @@ def register_reminders(
 
     If scheduler is None (scheduler feature flag disabled), this function is a no-op
     so that the reminder module does not crash startup when the scheduler is absent.
+
+    Returns a RemindersCommandHandler when reminder_target_chat_id is configured,
+    otherwise None. The caller should inject the returned value into bot.deps under
+    ``"reminders_handler"`` so Telegram handlers can access it via
+    ``context.bot_data["reminders_handler"]``.
     """
     if scheduler is None:
         logger.warning(
             "reminders.register.no_scheduler",
             reason="APScheduler instance is None — reminder jobs not registered",
         )
-        return
+        # Still create the command handler even without a scheduler
+        target_chat_id: Optional[int] = getattr(config, "reminder_target_chat_id", None)
+        if target_chat_id is None:
+            return None
+        return RemindersCommandHandler(db=db, target_chat_id=target_chat_id)
 
     # 1. ReminderConfig — reads lifestyle.md and communication-patterns.toml
     reminder_config = ReminderConfig(
@@ -118,3 +128,10 @@ def register_reminders(
         target_chat_id=config.reminder_target_chat_id,
         suppression_active=False,
     )
+
+    # 9. RemindersCommandHandler — provides /reminders Telegram command + cancel callback
+    target_chat_id = getattr(config, "reminder_target_chat_id", None)
+    if target_chat_id is None:
+        return None
+
+    return RemindersCommandHandler(db=db, target_chat_id=target_chat_id)

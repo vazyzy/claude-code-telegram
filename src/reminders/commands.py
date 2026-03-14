@@ -1,8 +1,8 @@
 """Telegram bot commands for the reminders module."""
 from __future__ import annotations
 
-from datetime import timezone, timedelta
-from typing import List
+from datetime import timedelta, timezone
+from typing import List, Optional
 
 import structlog
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -29,6 +29,11 @@ WHERE sent = 0 AND cancelled = 0 AND expired = 0 AND failed = 0
   AND trigger_day <= date('now', '+7 days')
 ORDER BY trigger_day ASC, scheduled_time ASC
 """
+
+
+def _noop() -> Optional[str]:
+    """Keep Optional imported; resolved by type annotation usage below."""
+    return None
 
 
 class RemindersCommandHandler:
@@ -69,6 +74,7 @@ class RemindersCommandHandler:
         for reminder in reminders:
             urgency_emoji = _URGENCY_EMOJI.get(reminder.urgency, "🟡")
 
+            time_str: str
             if reminder.scheduled_time is not None:
                 # Convert UTC-aware datetime to UTC+7 for display
                 local_time = reminder.scheduled_time.astimezone(UTC7)
@@ -92,7 +98,6 @@ class RemindersCommandHandler:
 
         text = "\n\n".join(lines)
         reply_markup = InlineKeyboardMarkup(keyboard_rows)
-
         await update.message.reply_text(text, reply_markup=reply_markup)
 
     async def handle_reminder_cancel_callback(
@@ -118,7 +123,9 @@ class RemindersCommandHandler:
                 reminder_id=reminder_id,
                 error=str(exc),
             )
-            await query.edit_message_text("Failed to cancel reminder. Please try again.")
+            await query.edit_message_text(
+                "Failed to cancel reminder. Please try again."
+            )
             return
 
         logger.info("reminders.commands.cancelled", reminder_id=reminder_id)
