@@ -217,6 +217,33 @@ class Settings(BaseSettings):
     enable_api_server: bool = Field(False, description="Enable FastAPI webhook server")
     api_server_port: int = Field(8080, description="Webhook API server port")
     enable_scheduler: bool = Field(False, description="Enable job scheduler")
+
+    # Reminders module
+    obsidian_vault_path: Optional[str] = Field(
+        None, description="Path to the Obsidian vault root directory"
+    )
+    lifestyle_md_path: Optional[str] = Field(
+        None, description="Path to lifestyle.md inside the Obsidian vault"
+    )
+    google_calendar_id: str = Field(
+        "primary", description="Google Calendar ID to read events from"
+    )
+    gws_binary_path: str = Field(
+        "gws", description="Path to gws CLI binary for Google Workspace access"
+    )
+    reminder_target_chat_id: Optional[int] = Field(
+        None, description="Telegram chat ID to deliver reminder messages to"
+    )
+    reminder_comms_patterns_path: str = Field(
+        "data/communication-patterns.toml",
+        description="Path to TOML file with communication pattern rules",
+    )
+    reminder_intent_detection: bool = Field(
+        True, description="Enable LLM-based intent detection for reminders"
+    )
+    reminder_llm_circuit_breaker: int = Field(
+        20, description="Max consecutive LLM failures before circuit breaker opens"
+    )
     github_webhook_secret: Optional[str] = Field(
         None, description="GitHub webhook HMAC secret"
     )
