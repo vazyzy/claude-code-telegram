@@ -27,6 +27,7 @@ from src.exceptions import ConfigurationError
 from src.notifications.service import NotificationService
 from src.projects import ProjectThreadManager, load_project_registry
 from src.scheduler.scheduler import JobScheduler
+from src.reminders.register import register_reminders
 from src.security.audit import AuditLogger, InMemoryAuditStorage
 from src.security.auth import (
     AuthenticationManager,
@@ -296,6 +297,15 @@ async def run_application(app: Dict[str, Any]) -> None:
         )
         notification_service.register()
         await notification_service.start()
+
+        # Wire reminder module (stub until T-010)
+        register_reminders(
+            scheduler=scheduler._scheduler if scheduler else None,
+            db=storage.db_manager,
+            notification=notification_service,
+            bot=telegram_bot,
+            config=config,
+        )
 
         # Collect concurrent tasks
         tasks = []
