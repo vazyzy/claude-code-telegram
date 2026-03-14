@@ -21,9 +21,11 @@ T-011 behaviour (GoogleAuthError):
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any, Optional
+from uuid import uuid4
 
 import anthropic
 import structlog
@@ -40,6 +42,10 @@ _UTC7 = timezone(timedelta(hours=7))
 
 # Maximum seconds to wait for the Claude planning call before giving up
 _LLM_TIMEOUT_SECONDS: int = 120
+
+# Maximum characters of lifestyle context sent to Claude in the planning prompt.
+# Keeps large personal files from being sent to the Anthropic API wholesale.
+_LIFESTYLE_MAX_CHARS: int = 2_000
 
 # ---------------------------------------------------------------------------
 # Module-level constants
@@ -105,10 +111,37 @@ PLANNER_TOOL: dict[str, Any] = {
     },
 }
 
-# Required fields that must be present in every reminder item from the LLM
+# Required fields that must be present in every reminder item from the LLM.
+# source_event_id is required as a key (a null VALUE is still valid — handled
+# by the NULL-safe dedup query in _dedup_and_insert).
 _REQUIRED_REMINDER_FIELDS = frozenset(
-    ["hint", "urgency", "scheduled_time", "source_type", "reminder_type", "trigger_day", "reason"]
+    [
+        "hint",
+        "urgency",
+        "scheduled_time",
+        "source_event_id",
+        "source_type",
+        "reminder_type",
+        "trigger_day",
+        "reason",
+    ]
 )
+
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+
+
+def _sanitize(text: str, max_len: int = 200) -> str:
+    """Strip newlines and truncate to prevent prompt injection.
+
+    User-controlled strings (event titles, locations, descriptions, suppression
+    rule topics) must be sanitised before embedding in the planning prompt.
+    Embedded newlines could break the prompt structure; truncation caps the
+    surface area sent to the API.
+    """
+    return text.replace("\n", " ").replace("\r", " ")[:max_len]
 
 
 # ---------------------------------------------------------------------------
@@ -231,13 +264,23 @@ class NightlyPlanner:
 
             # Step 4: call Claude with forced tool use
             log.info("reminders.planner.llm_call_start", event_count=len(events))
-            response = await self._client.messages.create(
-                model=self._model,
-                max_tokens=4096,
-                tools=[PLANNER_TOOL],  # type: ignore[list-item]
-                tool_choice={"type": "any"},
-                messages=[{"role": "user", "content": prompt}],
-            )
+            try:
+                response = await asyncio.wait_for(
+                    self._client.messages.create(
+                        model=self._model,
+                        max_tokens=4096,
+                        tools=[PLANNER_TOOL],  # type: ignore[list-item]
+                        tool_choice={"type": "any"},
+                        messages=[{"role": "user", "content": prompt}],
+                    ),
+                    timeout=_LLM_TIMEOUT_SECONDS,
+                )
+            except (asyncio.TimeoutError, TimeoutError):
+                logger.warning(
+                    "reminders.planner.llm_timeout",
+                    timeout_seconds=_LLM_TIMEOUT_SECONDS,
+                )
+                raise
             log.info(
                 "reminders.planner.llm_call_complete",
                 input_tokens=response.usage.input_tokens,
@@ -277,7 +320,6 @@ class NightlyPlanner:
                 log.error(
                     "reminders.planner.parse_error",
                     error=str(exc),
-                    raw_snippet=raw_repr[:200],
                 )
                 await self._send_failure_notification(
                     f"LLM output could not be parsed: {exc}"
@@ -292,6 +334,12 @@ class NightlyPlanner:
                 "reminders.planner.run_complete",
                 reminders_proposed=len(reminders),
                 reminders_inserted=inserted,
+            )
+
+        except (asyncio.TimeoutError, TimeoutError):
+            # Already logged as reminders.planner.llm_timeout above; just notify
+            await self._send_failure_notification(
+                f"LLM call timed out after {_LLM_TIMEOUT_SECONDS}s"
             )
 
         except GoogleAuthError as exc:
@@ -387,20 +435,27 @@ class NightlyPlanner:
                     else:
                         duration_str = f" ({total_minutes}m)"
                 date_str = ev_local.strftime("%Y-%m-%d")
-                line = f"- [{ev.event_id}] {ev.title} on {date_str} at {time_str}{duration_str}"
+                safe_title = _sanitize(ev.title, 150)
+                line = f"- [{ev.event_id}] {safe_title} on {date_str} at {time_str}{duration_str}"
                 if ev.location:
-                    line += f" @ {ev.location}"
+                    line += f" @ {_sanitize(ev.location, 100)}"
+                if ev.description:
+                    line += f" | {_sanitize(ev.description, 200)}"
                 event_lines.append(line)
             events_section = "\n".join(event_lines)
         else:
             events_section = "(no events in next 7 days)"
 
         # --- Lifestyle section ---
-        lifestyle_section = lifestyle.strip() if lifestyle.strip() else "(none provided)"
+        lifestyle_section = lifestyle.strip() or "(none provided)"
+        if len(lifestyle_section) > _LIFESTYLE_MAX_CHARS:
+            lifestyle_section = lifestyle_section[:_LIFESTYLE_MAX_CHARS] + "\n[truncated]"
 
         # --- Suppression rules section ---
         if suppressions:
-            suppression_lines = [f"- {r.topic}" for r in suppressions if hasattr(r, "topic")]
+            suppression_lines = [
+                f"- {_sanitize(r.topic, 100)}" for r in suppressions if hasattr(r, "topic")
+            ]
             suppression_section = "\n".join(suppression_lines) if suppression_lines else "(none)"
         else:
             suppression_section = "(none)"
@@ -454,6 +509,11 @@ class NightlyPlanner:
                 '"normal" or "high" as appropriate.'
             ),
             "Schedule reminders during non-quiet hours where possible (urgency=critical may fire anytime).",
+            (
+                "Set trigger_day to the UTC+7 date of scheduled_time "
+                "(e.g., if scheduled_time is 2026-03-15T22:00:00Z, trigger_day is \"2026-03-16\" "
+                "because 22:00 UTC = 05:00 UTC+7 next day)."
+            ),
             "Use the schedule_reminders tool to output ALL reminders as a single call.",
         ]
 
@@ -508,6 +568,20 @@ class NightlyPlanner:
                     f"{item['scheduled_time']!r}: {exc}"
                 ) from exc
 
+            # Validate scheduled_time is in the future
+            _now = datetime.now(UTC)
+            if scheduled_time <= _now:
+                raise PlannerParseError(
+                    f"reminder[{idx}] scheduled_time is not in the future: "
+                    f"{item['scheduled_time']!r}"
+                )
+            # Validate scheduled_time is within the 8-day planning window
+            if scheduled_time >= _now + timedelta(days=8):
+                raise PlannerParseError(
+                    f"reminder[{idx}] scheduled_time exceeds 8-day planning window: "
+                    f"{item['scheduled_time']!r}"
+                )
+
             # Parse expires_at — optional, may be null
             expires_at: Optional[datetime] = None
             raw_expires = item.get("expires_at")
@@ -542,18 +616,37 @@ class NightlyPlanner:
                     f"reminder[{idx}] invalid reminder_type {reminder_type!r}"
                 )
 
+            # Validate string field lengths — raise rather than silently truncate
+            hint = str(item["hint"])
+            if len(hint) > 200:
+                raise PlannerParseError(
+                    f"reminder[{idx}] hint exceeds 200 chars ({len(hint)}): {hint[:50]}..."
+                )
+            reason_val = str(item["reason"])
+            if len(reason_val) > 300:
+                raise PlannerParseError(
+                    f"reminder[{idx}] reason exceeds 300 chars ({len(reason_val)}): {reason_val[:50]}..."
+                )
+            context_notes = item.get("context_notes")
+            if context_notes is not None:
+                context_notes = str(context_notes)
+                if len(context_notes) > 500:
+                    raise PlannerParseError(
+                        f"reminder[{idx}] context_notes exceeds 500 chars ({len(context_notes)})"
+                    )
+
             records.append(
                 ReminderRecord(
-                    hint=str(item["hint"])[:200],
+                    hint=hint,
                     urgency=urgency,
                     scheduled_time=scheduled_time,
                     expires_at=expires_at,
-                    context_notes=item.get("context_notes"),
+                    context_notes=context_notes,
                     source_event_id=item.get("source_event_id"),
                     source_type=source_type,
                     reminder_type=reminder_type,
                     trigger_day=str(item["trigger_day"]),
-                    reason=str(item["reason"])[:300],
+                    reason=reason_val,
                 )
             )
 
@@ -575,14 +668,16 @@ class NightlyPlanner:
         """
         inserted = 0
         for r in reminders:
-            # Check for existing row with the same dedup key
+            # Check for existing row with the same dedup key.
+            # NULL = NULL evaluates to NULL in SQLite (not TRUE), so we must use
+            # IS NULL / IS NOT NULL for the source_event_id column when it is None.
             cursor = await conn.execute(
                 """SELECT 1 FROM reminders
-                   WHERE source_event_id = ?
+                   WHERE (source_event_id = ? OR (source_event_id IS NULL AND ? IS NULL))
                      AND reminder_type = ?
                      AND trigger_day = ?
                    LIMIT 1""",
-                (r.source_event_id, r.reminder_type, r.trigger_day),
+                (r.source_event_id, r.source_event_id, r.reminder_type, r.trigger_day),
             )
             row = await cursor.fetchone()
             if row is not None:
@@ -698,6 +793,20 @@ class NightlyPlanner:
         notification_sent = True
         try:
             await self.bot.send_message(chat_id=self.target_chat_id, text=text)
+            # Log successful notification to planner_log
+            async with self.db.get_connection() as conn:
+                await conn.execute(
+                    "INSERT INTO planner_log (id, event_time, action, reason, notification_sent)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (
+                        str(uuid4()),
+                        datetime.now(UTC).isoformat(),
+                        "failure_notification_sent",
+                        brief_reason,
+                        1,
+                    ),
+                )
+                await conn.commit()
         except Exception as send_exc:  # noqa: BLE001
             notification_sent = False
             logger.error(

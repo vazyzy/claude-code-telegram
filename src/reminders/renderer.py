@@ -111,13 +111,15 @@ class LLMRenderer:
         prompt = self._build_prompt(reminder, today_events, lifestyle, current_time)
 
         try:
-            async with asyncio.timeout(self.RENDER_TIMEOUT_SECONDS):
-                message = await self._client.messages.create(
+            message = await asyncio.wait_for(
+                self._client.messages.create(
                     model=self._model,
                     max_tokens=256,
                     messages=[{"role": "user", "content": prompt}],
-                )
-        except TimeoutError:
+                ),
+                timeout=self.RENDER_TIMEOUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
             logger.warning(
                 "reminders.renderer.timeout",
                 reminder_id=reminder.id,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 
 import structlog
 
@@ -28,6 +29,7 @@ _FETCH_DUE_SQL = """
 SELECT *
 FROM reminders
 WHERE sent = 0
+  AND failed = 0
   AND cancelled = 0
   AND expired = 0
   AND scheduled_time <= datetime('now')
@@ -211,6 +213,17 @@ class ReminderScheduler:
             next_delivery = _next_after_quiet_end(
                 patterns.quiet_hours.end, now_utc
             )
+            # T-008: if rescheduled time exceeds expires_at, mark expired instead of snoozing
+            if reminder.expires_at is not None:
+                expires_utc = self._ensure_utc(reminder.expires_at)
+                if next_delivery > expires_utc:
+                    log.info(
+                        "reminders.scheduler.snooze_past_expiry",
+                        next_delivery=next_delivery.isoformat(),
+                        expires_at=expires_utc.isoformat(),
+                    )
+                    await self._mark_expired(reminder.id, reason="snooze would exceed expires_at")
+                    return
             log.info(
                 "reminders.scheduler.quiet_hours_snooze",
                 snooze_until=next_delivery.isoformat(),
@@ -236,12 +249,36 @@ class ReminderScheduler:
         until_str = until.isoformat()
         async with self._db.get_connection() as conn:
             await conn.execute(_UPDATE_SNOOZE_SQL, (until_str, reminder_id))
+            # T-008: log every state transition to planner_log
+            await conn.execute(
+                "INSERT INTO planner_log (id, event_time, action, reminder_id, reason)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (
+                    str(uuid4()),
+                    datetime.now(UTC).isoformat(),
+                    "snoozed",
+                    reminder_id,
+                    f"quiet hours until {until_str}",
+                ),
+            )
             await conn.commit()
 
-    async def _mark_expired(self, reminder_id: str) -> None:
+    async def _mark_expired(self, reminder_id: str, reason: str = "past expires_at") -> None:
         """Set ``expired = 1`` for *reminder_id*."""
         async with self._db.get_connection() as conn:
             await conn.execute(_MARK_EXPIRED_SQL, (reminder_id,))
+            # T-008: log every state transition to planner_log
+            await conn.execute(
+                "INSERT INTO planner_log (id, event_time, action, reminder_id, reason)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (
+                    str(uuid4()),
+                    datetime.now(UTC).isoformat(),
+                    "expired",
+                    reminder_id,
+                    reason,
+                ),
+            )
             await conn.commit()
 
     # ------------------------------------------------------------------
