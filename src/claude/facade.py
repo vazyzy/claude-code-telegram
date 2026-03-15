@@ -10,6 +10,7 @@ import structlog
 
 from ..config.settings import Settings
 from .memory import UserMemoryService
+from .personal_context import PersonalContextService
 from .sdk_integration import ClaudeResponse, ClaudeSDKManager, StreamUpdate
 from .session import SessionManager
 
@@ -25,12 +26,14 @@ class ClaudeIntegration:
         sdk_manager: Optional[ClaudeSDKManager] = None,
         session_manager: Optional[SessionManager] = None,
         memory_service: Optional[UserMemoryService] = None,
+        personal_context_service: Optional[PersonalContextService] = None,
     ):
         """Initialize Claude integration facade."""
         self.config = config
         self.sdk_manager = sdk_manager or ClaudeSDKManager(config)
         self.session_manager = session_manager
         self.memory_service = memory_service
+        self.personal_context_service = personal_context_service
 
     async def run_command(
         self,
@@ -75,7 +78,45 @@ class ClaudeIntegration:
 
         # Execute command
         try:
-            # Build memory prompt if memory service is available
+            # Layer 1: Personal assistant behavioral principles (P1–P9)
+            assistant_principles_prompt = None
+            if self.config.enable_assistant_principles:
+                try:
+                    from .assistant_principles import build_assistant_principles_prompt
+
+                    assistant_principles_prompt = build_assistant_principles_prompt()
+                except Exception as ap_err:
+                    logger.warning(
+                        "Failed to build assistant principles prompt",
+                        error=str(ap_err),
+                    )
+
+            # Layer 2: Personal context (lifestyle, now, struggles, comms style)
+            personal_context_prompt = None
+            if self.config.enable_personal_context and self.personal_context_service:
+                try:
+                    personal_context_prompt = (
+                        await self.personal_context_service.build_context_prompt()
+                    )
+                except Exception as pc_err:
+                    logger.warning(
+                        "Failed to build personal context prompt", error=str(pc_err)
+                    )
+
+            # Layer 3: Agent coding principles (workflow, risk tiers, quality gates)
+            agent_principles_prompt = None
+            if self.config.enable_agent_principles:
+                try:
+                    from .agent_principles import build_agent_principles_prompt
+
+                    agent_principles_prompt = build_agent_principles_prompt()
+                except Exception as principles_err:
+                    logger.warning(
+                        "Failed to build agent principles prompt",
+                        error=str(principles_err),
+                    )
+
+            # Layer 4: User memory (learned facts, persistent preferences)
             memory_prompt = None
             if self.memory_service:
                 try:
@@ -85,22 +126,19 @@ class ClaudeIntegration:
                 except Exception as mem_err:
                     logger.warning("Failed to build memory prompt", error=str(mem_err))
 
-            # Build agent principles prompt if enabled
-            principles_prompt = None
-            if self.config.enable_agent_principles:
-                try:
-                    from .agent_principles import build_agent_principles_prompt
-
-                    principles_prompt = build_agent_principles_prompt()
-                except Exception as principles_err:
-                    logger.warning(
-                        "Failed to build agent principles prompt",
-                        error=str(principles_err),
-                    )
-
-            # Combine: principles first (persistent rules), memory second (user facts)
+            # Combine all layers in order: who you are → who the user is →
+            # coding rules → learned facts
             combined_system_prompt: Optional[str] = None
-            prompt_parts = [p for p in [principles_prompt, memory_prompt] if p]
+            prompt_parts = [
+                p
+                for p in [
+                    assistant_principles_prompt,
+                    personal_context_prompt,
+                    agent_principles_prompt,
+                    memory_prompt,
+                ]
+                if p
+            ]
             if prompt_parts:
                 combined_system_prompt = "\n\n".join(prompt_parts)
 

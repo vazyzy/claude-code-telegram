@@ -228,6 +228,31 @@ class Settings(BaseSettings):
         le=2,
     )
 
+    # Personal assistant principles + context injection
+    enable_assistant_principles: bool = Field(
+        True,
+        description=(
+            "Inject personal assistant behavioral principles (P1–P9) into every Claude "
+            "session. Drawn from specs/20-product/assistant-principles.md. "
+            "Set ENABLE_ASSISTANT_PRINCIPLES=false to disable."
+        ),
+    )
+    enable_personal_context: bool = Field(
+        True,
+        description=(
+            "Inject lifestyle.md / now.md / struggles.md / communication-style.md into "
+            "every Claude session as <personal_context>. "
+            "Set ENABLE_PERSONAL_CONTEXT=false to disable."
+        ),
+    )
+    communication_style_md_path: Optional[str] = Field(
+        None,
+        description=(
+            "Path to AI Assistant/communication-style.md in the Obsidian vault. "
+            "Updated by the assistant as communication patterns are learned."
+        ),
+    )
+
     # Agent principles injection
     enable_agent_principles: bool = Field(
         True,

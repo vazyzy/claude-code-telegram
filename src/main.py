@@ -17,6 +17,7 @@ from src.claude import (
     SessionManager,
 )
 from src.claude.memory import UserMemoryService
+from src.claude.personal_context import PersonalContextService
 from src.claude.sdk_integration import ClaudeSDKManager
 from src.config.features import FeatureFlags
 from src.config.settings import Settings
@@ -26,8 +27,8 @@ from src.events.middleware import EventSecurityMiddleware
 from src.exceptions import ConfigurationError
 from src.notifications.service import NotificationService
 from src.projects import ProjectThreadManager, load_project_registry
-from src.scheduler.scheduler import JobScheduler
 from src.reminders.register import register_reminders
+from src.scheduler.scheduler import JobScheduler
 from src.security.audit import AuditLogger, InMemoryAuditStorage
 from src.security.auth import (
     AuthenticationManager,
@@ -152,11 +153,20 @@ async def create_application(config: Settings) -> Dict[str, Any]:
         max_facts=20,
     )
 
+    # Create personal context service (reads lifestyle/now/struggles/comms-style)
+    personal_context_service = PersonalContextService(
+        lifestyle_md_path=config.lifestyle_md_path,
+        now_md_path=config.now_md_path,
+        struggles_md_path=config.struggles_md_path,
+        communication_style_md_path=config.communication_style_md_path,
+    )
+
     claude_integration = ClaudeIntegration(
         config=config,
         sdk_manager=sdk_manager,
         session_manager=session_manager,
         memory_service=memory_service,
+        personal_context_service=personal_context_service,
     )
 
     # --- Event bus and agentic platform components ---
