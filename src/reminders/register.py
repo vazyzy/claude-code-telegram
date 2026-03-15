@@ -54,11 +54,12 @@ def register_reminders(
             return None
         return RemindersCommandHandler(db=db, target_chat_id=target_chat_id)
 
-    # 1. ReminderConfig — reads lifestyle.md, now.md, and communication-patterns.toml
+    # 1. ReminderConfig — reads lifestyle.md, now.md, struggles.md, and comms patterns
     reminder_config = ReminderConfig(
         lifestyle_md_path=config.lifestyle_md_path,
         comms_patterns_path=config.reminder_comms_patterns_path,
         now_md_path=config.now_md_path,
+        struggles_md_path=config.struggles_md_path,
     )
 
     # 2. GoogleCalendarClient — wraps gws CLI binary

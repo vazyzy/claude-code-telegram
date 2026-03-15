@@ -119,6 +119,9 @@ class ReminderConfig:
     now_md_path:
         Filesystem path to now.md — current situation, travel plans, open
         decisions.  Optional; appended to lifestyle text when present.
+    struggles_md_path:
+        Filesystem path to struggles.md — open loops, what's hard, what's
+        blocked.  Optional; appended last so the planner sees current state.
     comms_patterns_path:
         Filesystem path to ``communication-patterns.toml``.  If the file does
         not exist it is created with the default content.
@@ -129,12 +132,16 @@ class ReminderConfig:
         lifestyle_md_path: Optional[str | Path],
         comms_patterns_path: str | Path,
         now_md_path: Optional[str | Path] = None,
+        struggles_md_path: Optional[str | Path] = None,
     ) -> None:
         self._lifestyle_path: Optional[Path] = (
             Path(lifestyle_md_path) if lifestyle_md_path else None
         )
         self._now_path: Optional[Path] = (
             Path(now_md_path) if now_md_path else None
+        )
+        self._struggles_path: Optional[Path] = (
+            Path(struggles_md_path) if struggles_md_path else None
         )
         self._comms_path: Path = Path(comms_patterns_path)
 
@@ -176,6 +183,11 @@ class ReminderConfig:
 
         if self._now_path is not None:
             text = self._read_file(self._now_path, "now.md")
+            if text:
+                parts.append(text)
+
+        if self._struggles_path is not None:
+            text = self._read_file(self._struggles_path, "struggles.md")
             if text:
                 parts.append(text)
 

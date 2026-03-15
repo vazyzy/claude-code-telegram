@@ -269,6 +269,9 @@ class Settings(BaseSettings):
     now_md_path: Optional[str] = Field(
         None, description="Path to now.md — current situation, travel, open decisions"
     )
+    struggles_md_path: Optional[str] = Field(
+        None, description="Path to struggles.md — open loops, blockers, what's hard"
+    )
     google_calendar_id: str = Field(
         "primary", description="Google Calendar ID to read events from"
     )
