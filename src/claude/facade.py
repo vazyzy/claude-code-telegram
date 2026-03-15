@@ -85,6 +85,25 @@ class ClaudeIntegration:
                 except Exception as mem_err:
                     logger.warning("Failed to build memory prompt", error=str(mem_err))
 
+            # Build agent principles prompt if enabled
+            principles_prompt = None
+            if self.config.enable_agent_principles:
+                try:
+                    from .agent_principles import build_agent_principles_prompt
+
+                    principles_prompt = build_agent_principles_prompt()
+                except Exception as principles_err:
+                    logger.warning(
+                        "Failed to build agent principles prompt",
+                        error=str(principles_err),
+                    )
+
+            # Combine: principles first (persistent rules), memory second (user facts)
+            combined_system_prompt: Optional[str] = None
+            prompt_parts = [p for p in [principles_prompt, memory_prompt] if p]
+            if prompt_parts:
+                combined_system_prompt = "\n\n".join(prompt_parts)
+
             # Continue session if we have an existing session with a real ID
             is_new = getattr(session, "is_new_session", False)
             should_continue = not is_new and bool(session.session_id)
@@ -99,7 +118,7 @@ class ClaudeIntegration:
                     session_id=claude_session_id,
                     continue_session=should_continue,
                     stream_callback=on_stream,
-                    append_system_prompt=memory_prompt,
+                    append_system_prompt=combined_system_prompt,
                     ask_user_callback=ask_user_callback,
                 )
             except Exception as resume_error:
@@ -125,7 +144,7 @@ class ClaudeIntegration:
                         session_id=None,
                         continue_session=False,
                         stream_callback=on_stream,
-                        append_system_prompt=memory_prompt,
+                        append_system_prompt=combined_system_prompt,
                         ask_user_callback=ask_user_callback,
                     )
                 else:

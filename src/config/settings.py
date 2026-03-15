@@ -228,6 +228,16 @@ class Settings(BaseSettings):
         le=2,
     )
 
+    # Agent principles injection
+    enable_agent_principles: bool = Field(
+        True,
+        description=(
+            "Inject agent workflow and pipeline principles into every Claude session. "
+            "Draws from coding-with-agents and ai-pipeline-guardrails decisions. "
+            "Set ENABLE_AGENT_PRINCIPLES=false to disable."
+        ),
+    )
+
     # Streaming drafts (Telegram sendMessageDraft)
     enable_stream_drafts: bool = Field(
         False,
