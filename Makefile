@@ -1,4 +1,5 @@
-.PHONY: install dev test lint format clean help run run-remote remote-attach remote-stop \
+.PHONY: install dev test lint format clean help run restart bot-stop bot-logs \
+       run-remote remote-attach remote-stop \
        bump-patch bump-minor bump-major release version
 
 # Default target
@@ -52,6 +53,16 @@ run:
 # For debugging
 run-debug:
 	poetry run claude-telegram-bot --debug
+
+# Tmux-managed bot (use from Claude Code or SSH)
+restart:  ## Kill existing bot & start fresh in tmux (safe to call repeatedly)
+	./scripts/restart-bot.sh
+
+bot-stop:  ## Stop the bot tmux session
+	tmux kill-session -t claude-bot 2>/dev/null || echo "No session to kill"
+
+bot-logs:  ## Show recent bot output from tmux
+	tmux capture-pane -t claude-bot -p -S -50
 
 # Remote Mac Mini (SSH session)
 run-remote:  ## Start bot on remote Mac in tmux (persists after SSH disconnect)
