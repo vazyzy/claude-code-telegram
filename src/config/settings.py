@@ -266,6 +266,9 @@ class Settings(BaseSettings):
     lifestyle_md_path: Optional[str] = Field(
         None, description="Path to lifestyle.md inside the Obsidian vault"
     )
+    now_md_path: Optional[str] = Field(
+        None, description="Path to now.md — current situation, travel, open decisions"
+    )
     google_calendar_id: str = Field(
         "primary", description="Google Calendar ID to read events from"
     )

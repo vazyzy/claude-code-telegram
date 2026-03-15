@@ -116,6 +116,9 @@ class ReminderConfig:
     lifestyle_md_path:
         Filesystem path to lifestyle.md.  May be ``None`` when the setting is
         not configured; :meth:`load_lifestyle` will return an empty string.
+    now_md_path:
+        Filesystem path to now.md — current situation, travel plans, open
+        decisions.  Optional; appended to lifestyle text when present.
     comms_patterns_path:
         Filesystem path to ``communication-patterns.toml``.  If the file does
         not exist it is created with the default content.
@@ -125,9 +128,13 @@ class ReminderConfig:
         self,
         lifestyle_md_path: Optional[str | Path],
         comms_patterns_path: str | Path,
+        now_md_path: Optional[str | Path] = None,
     ) -> None:
         self._lifestyle_path: Optional[Path] = (
             Path(lifestyle_md_path) if lifestyle_md_path else None
+        )
+        self._now_path: Optional[Path] = (
+            Path(now_md_path) if now_md_path else None
         )
         self._comms_path: Path = Path(comms_patterns_path)
 
@@ -135,36 +142,44 @@ class ReminderConfig:
     # Public helpers
     # ------------------------------------------------------------------
 
-    def load_lifestyle(self) -> str:
-        """Read lifestyle.md and return its text content.
+    def _read_file(self, path: Path, label: str) -> str:
+        """Read a single markdown file, truncating if oversized."""
+        if not path.exists():
+            logger.warning(f"{label} not found", path=str(path))
+            return ""
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning(f"Could not read {label}", exc=str(exc))
+            return ""
+        if len(text) > _LIFESTYLE_MAX_CHARS:
+            text = text[:_LIFESTYLE_MAX_CHARS] + _LIFESTYLE_TRUNCATION_SUFFIX
+        return text
 
-        Returns an empty string if the path is not configured or the file is
-        missing.  Content is truncated to ``_LIFESTYLE_MAX_CHARS`` characters;
-        a ``[lifestyle.md truncated]`` suffix is appended when truncation
-        occurs.
+    def load_lifestyle(self) -> str:
+        """Read lifestyle.md + now.md and return combined text.
+
+        Returns an empty string if neither path is configured or both files
+        are missing.  Each file is truncated individually to
+        ``_LIFESTYLE_MAX_CHARS`` characters before concatenation.
         """
+        parts: list[str] = []
+
         if self._lifestyle_path is None:
             logger.warning(
                 "lifestyle_md_path not configured — skipping lifestyle.md load"
             )
-            return ""
+        else:
+            text = self._read_file(self._lifestyle_path, "lifestyle.md")
+            if text:
+                parts.append(text)
 
-        if not self._lifestyle_path.exists():
-            logger.warning(
-                "lifestyle.md not found", path=str(self._lifestyle_path)
-            )
-            return ""
+        if self._now_path is not None:
+            text = self._read_file(self._now_path, "now.md")
+            if text:
+                parts.append(text)
 
-        try:
-            text = self._lifestyle_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.warning("Could not read lifestyle.md", exc=str(exc))
-            return ""
-
-        if len(text) > _LIFESTYLE_MAX_CHARS:
-            text = text[:_LIFESTYLE_MAX_CHARS] + _LIFESTYLE_TRUNCATION_SUFFIX
-
-        return text
+        return "\n\n---\n\n".join(parts)
 
     def load_comms_patterns(self) -> CommPatterns:
         """Read ``communication-patterns.toml`` and return a :class:`CommPatterns`.
