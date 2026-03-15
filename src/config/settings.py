@@ -307,6 +307,13 @@ class Settings(BaseSettings):
     struggles_md_path: Optional[str] = Field(
         None, description="Path to struggles.md — open loops, blockers, what's hard"
     )
+    goals_dir_path: Optional[str] = Field(
+        None,
+        description=(
+            "Path to Goals/ directory in the Obsidian vault. "
+            "All *.md files are read and injected as <goals_context> for P7 priority hierarchy."
+        ),
+    )
     google_calendar_id: str = Field(
         "primary", description="Google Calendar ID to read events from"
     )

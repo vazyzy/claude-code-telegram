@@ -10,6 +10,7 @@ import structlog
 
 from ..config.settings import Settings
 from .memory import UserMemoryService
+from .open_loops import OpenLoopService
 from .personal_context import PersonalContextService
 from .sdk_integration import ClaudeResponse, ClaudeSDKManager, StreamUpdate
 from .session import SessionManager
@@ -27,6 +28,7 @@ class ClaudeIntegration:
         session_manager: Optional[SessionManager] = None,
         memory_service: Optional[UserMemoryService] = None,
         personal_context_service: Optional[PersonalContextService] = None,
+        open_loop_service: Optional[OpenLoopService] = None,
     ):
         """Initialize Claude integration facade."""
         self.config = config
@@ -34,6 +36,7 @@ class ClaudeIntegration:
         self.session_manager = session_manager
         self.memory_service = memory_service
         self.personal_context_service = personal_context_service
+        self.open_loop_service = open_loop_service
 
     async def run_command(
         self,
@@ -126,8 +129,20 @@ class ClaudeIntegration:
                 except Exception as mem_err:
                     logger.warning("Failed to build memory prompt", error=str(mem_err))
 
+            # Layer 5: Open loops (unresolved items from past sessions — P2)
+            open_loops_prompt = None
+            if self.open_loop_service:
+                try:
+                    open_loops_prompt = (
+                        await self.open_loop_service.build_open_loops_prompt(user_id)
+                    )
+                except Exception as ol_err:
+                    logger.warning(
+                        "Failed to build open loops prompt", error=str(ol_err)
+                    )
+
             # Combine all layers in order: who you are → who the user is →
-            # coding rules → learned facts
+            # coding rules → learned facts → unresolved items
             combined_system_prompt: Optional[str] = None
             prompt_parts = [
                 p
@@ -136,6 +151,7 @@ class ClaudeIntegration:
                     personal_context_prompt,
                     agent_principles_prompt,
                     memory_prompt,
+                    open_loops_prompt,
                 ]
                 if p
             ]
@@ -200,6 +216,20 @@ class ClaudeIntegration:
                 except Exception as mem_err:
                     logger.warning(
                         "Failed to process memory updates", error=str(mem_err)
+                    )
+
+            # Process open loop add/close tags from response
+            if self.open_loop_service and response.content:
+                try:
+                    await self.open_loop_service.apply_updates(
+                        user_id, response.content
+                    )
+                    response.content = self.open_loop_service.strip_tags(
+                        response.content
+                    )
+                except Exception as ol_err:
+                    logger.warning(
+                        "Failed to process open loop updates", error=str(ol_err)
                     )
 
             # Update session (assigns real session_id for new sessions)

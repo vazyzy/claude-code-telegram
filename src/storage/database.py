@@ -333,6 +333,24 @@ class DatabaseManager:
                 """,
             ),
             (6, MIGRATION_V6),
+            (
+                7,
+                """
+                -- Open loops table for P2 (Open Loops Are Sacred)
+                -- Tracks unresolved items across sessions; surfaced in system prompt
+                CREATE TABLE IF NOT EXISTS open_loops (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_open_loops_user
+                    ON open_loops(user_id, resolved_at);
+                """,
+            ),
         ]
 
     async def _init_pool(self):

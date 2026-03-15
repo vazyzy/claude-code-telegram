@@ -17,6 +17,7 @@ from .models import (
     AuditLogModel,
     CostTrackingModel,
     MessageModel,
+    OpenLoopModel,
     ProjectThreadModel,
     SessionModel,
     ToolUsageModel,
@@ -888,3 +889,56 @@ class UserMemoryRepository:
                 (user_id, keep_count),
             )
             await conn.commit()
+
+
+class OpenLoopRepository:
+    """Persistent storage for open loops (P2 — Open Loops Are Sacred)."""
+
+    def __init__(self, db_manager: DatabaseManager):
+        """Initialize repository."""
+        self.db = db_manager
+
+    async def add(self, user_id: int, text: str) -> OpenLoopModel:
+        """Add a new open loop and return the created entry."""
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC)
+        async with self.db.get_connection() as conn:
+            cursor = await conn.execute(
+                "INSERT INTO open_loops (user_id, text, created_at) VALUES (?, ?, ?)",
+                (user_id, text, now.isoformat()),
+            )
+            await conn.commit()
+            loop_id = cursor.lastrowid
+
+        logger.info("Open loop added", user_id=user_id, loop_id=loop_id)
+        return OpenLoopModel(id=loop_id, user_id=user_id, text=text, created_at=now)
+
+    async def resolve(self, loop_id: int) -> None:
+        """Mark an open loop as resolved."""
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC)
+        async with self.db.get_connection() as conn:
+            await conn.execute(
+                "UPDATE open_loops SET resolved_at = ? WHERE id = ?",
+                (now.isoformat(), loop_id),
+            )
+            await conn.commit()
+
+        logger.info("Open loop resolved", loop_id=loop_id)
+
+    async def get_open(self, user_id: int, limit: int = 3) -> List[OpenLoopModel]:
+        """Get the most recent unresolved open loops for a user."""
+        async with self.db.get_connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM open_loops
+                WHERE user_id = ? AND resolved_at IS NULL
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            )
+            rows = await cursor.fetchall()
+            return [OpenLoopModel.from_row(row) for row in rows]

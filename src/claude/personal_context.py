@@ -10,6 +10,7 @@ Files loaded:
   - now.md        — current situation, travel, open decisions (8,000 char limit)
   - struggles.md  — open loops, what's hard, blockers (8,000 char limit)
   - AI Assistant/communication-style.md — learned comms patterns (4,000 char limit)
+  - Goals/*.md    — active goal files for priority hierarchy (P7) (6,000 char total)
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ _LIFESTYLE_MAX_CHARS = 16_000
 _NOW_MAX_CHARS = 8_000
 _STRUGGLES_MAX_CHARS = 8_000
 _COMMS_STYLE_MAX_CHARS = 4_000
+_GOALS_MAX_CHARS = 6_000
 _TRUNCATION_SUFFIX = "\n[truncated]"
 
 
@@ -37,6 +39,7 @@ class PersonalContextService:
         now_md_path: Optional[str],
         struggles_md_path: Optional[str],
         communication_style_md_path: Optional[str],
+        goals_dir_path: Optional[str] = None,
     ) -> None:
         self._lifestyle_path = Path(lifestyle_md_path) if lifestyle_md_path else None
         self._now_path = Path(now_md_path) if now_md_path else None
@@ -44,6 +47,7 @@ class PersonalContextService:
         self._comms_path = (
             Path(communication_style_md_path) if communication_style_md_path else None
         )
+        self._goals_dir = Path(goals_dir_path) if goals_dir_path else None
 
     async def build_context_prompt(self) -> Optional[str]:
         """Build the <personal_context> block for system prompt injection.
@@ -74,11 +78,69 @@ class PersonalContextService:
         if comms:
             sections.append(f"## Communication Style (learned)\n{comms}")
 
+        goals = self._load_goals()
+        if goals:
+            sections.append(f"## Active Goals\n{goals}")
+
         if not sections:
             return None
 
         body = "\n\n---\n\n".join(sections)
         return f"<personal_context>\n{body}\n</personal_context>"
+
+    def _load_goals(self) -> str:
+        """Read all .md files from the Goals/ directory and concatenate.
+
+        Implements P7 (Priority Hierarchy) — gives the assistant awareness of
+        active goals so it can rank suggestions against the priority hierarchy.
+        Total output is capped at _GOALS_MAX_CHARS.
+        """
+        if self._goals_dir is None:
+            return ""
+
+        if not self._goals_dir.is_dir():
+            logger.debug("Goals directory not found", path=str(self._goals_dir))
+            return ""
+
+        goal_files = sorted(self._goals_dir.glob("*.md"))
+        if not goal_files:
+            return ""
+
+        parts: list[str] = []
+        total_chars = 0
+
+        for goal_file in goal_files:
+            try:
+                content = goal_file.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                logger.warning(
+                    "Failed to read goal file",
+                    path=str(goal_file),
+                    error=str(exc),
+                )
+                continue
+
+            if not content:
+                continue
+
+            header = f"### {goal_file.stem}\n"
+            entry = header + content + "\n"
+
+            if total_chars + len(entry) > _GOALS_MAX_CHARS:
+                remaining = _GOALS_MAX_CHARS - total_chars - len(header)
+                if remaining > 100:
+                    parts.append(header + content[:remaining] + _TRUNCATION_SUFFIX)
+                    logger.warning(
+                        "Goals context truncated",
+                        at_file=goal_file.name,
+                        limit=_GOALS_MAX_CHARS,
+                    )
+                break
+
+            parts.append(entry)
+            total_chars += len(entry)
+
+        return "\n".join(parts)
 
     def _read_file(
         self,

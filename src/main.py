@@ -17,6 +17,7 @@ from src.claude import (
     SessionManager,
 )
 from src.claude.memory import UserMemoryService
+from src.claude.open_loops import OpenLoopService
 from src.claude.personal_context import PersonalContextService
 from src.claude.sdk_integration import ClaudeSDKManager
 from src.config.features import FeatureFlags
@@ -153,12 +154,16 @@ async def create_application(config: Settings) -> Dict[str, Any]:
         max_facts=20,
     )
 
-    # Create personal context service (reads lifestyle/now/struggles/comms-style)
+    # Create open loop service for P2 (Open Loops Are Sacred)
+    open_loop_service = OpenLoopService(open_loop_repo=storage.open_loops)
+
+    # Create personal context service (reads lifestyle/now/struggles/comms-style/goals)
     personal_context_service = PersonalContextService(
         lifestyle_md_path=config.lifestyle_md_path,
         now_md_path=config.now_md_path,
         struggles_md_path=config.struggles_md_path,
         communication_style_md_path=config.communication_style_md_path,
+        goals_dir_path=config.goals_dir_path,
     )
 
     claude_integration = ClaudeIntegration(
@@ -167,6 +172,7 @@ async def create_application(config: Settings) -> Dict[str, Any]:
         session_manager=session_manager,
         memory_service=memory_service,
         personal_context_service=personal_context_service,
+        open_loop_service=open_loop_service,
     )
 
     # --- Event bus and agentic platform components ---

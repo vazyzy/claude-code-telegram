@@ -318,7 +318,7 @@ class UserMemoryEntry:
     """User memory entry for persistent cross-session memory."""
 
     user_id: int
-    category: str  # 'profile' or 'fact'
+    category: str  # 'profile', 'fact', or 'preference'
     key: str
     value: str
     id: Optional[int] = None
@@ -338,5 +338,32 @@ class UserMemoryEntry:
         """Create from database row."""
         data = dict(row)
         for field in ["created_at", "updated_at"]:
+            data[field] = _parse_datetime(data.get(field))
+        return cls(**data)
+
+
+@dataclass
+class OpenLoopModel:
+    """An unresolved item tracked across sessions (P2 — Open Loops Are Sacred)."""
+
+    user_id: int
+    text: str
+    id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        data = asdict(self)
+        for key in ["created_at", "resolved_at"]:
+            if data[key]:
+                data[key] = data[key].isoformat()
+        return data
+
+    @classmethod
+    def from_row(cls, row: aiosqlite.Row) -> "OpenLoopModel":
+        """Create from database row."""
+        data = dict(row)
+        for field in ["created_at", "resolved_at"]:
             data[field] = _parse_datetime(data.get(field))
         return cls(**data)

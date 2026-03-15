@@ -23,8 +23,12 @@ MEMORY_INSTRUCTIONS = (
     '<memory_update>{"set": [{"category": "fact", "key": "slug", '
     '"value": "text"}], "delete": ["key"]}</memory_update>\n'
     "Keep facts concise (one sentence each). "
-    "Use category 'profile' for preferences (timezone, language, name) "
-    "and 'fact' for everything else."
+    "Use category 'profile' for identity/demographic preferences (timezone, language, name), "
+    "'fact' for factual information, and 'preference' for communication preferences — "
+    "e.g. when the user says 'stop doing X', 'I prefer Y', or 'don't ask me about Z', "
+    "write a 'preference' entry so the rule persists across sessions. "
+    'Example: {"set": [{"category": "preference", "key": "no-daily-standups", '
+    '"value": "Do not suggest daily standups or check-ins"}]}'
 )
 
 
@@ -51,17 +55,25 @@ class UserMemoryService:
 
         profile_lines: List[str] = []
         fact_lines: List[str] = []
+        preference_lines: List[str] = []
 
         for entry in entries:
             line = f"- {entry.key}: {entry.value}"
             if entry.category == "profile":
                 profile_lines.append(line)
+            elif entry.category == "preference":
+                preference_lines.append(line)
             else:
                 fact_lines.append(line)
 
         sections: List[str] = []
         if profile_lines:
             sections.append("## Profile\n" + "\n".join(profile_lines))
+        if preference_lines:
+            sections.append(
+                "## Communication Preferences (follow strictly)\n"
+                + "\n".join(preference_lines)
+            )
         if fact_lines:
             sections.append("## Facts\n" + "\n".join(fact_lines))
 
@@ -101,9 +113,10 @@ class UserMemoryService:
             )
 
         for key in delete_keys:
-            # Try both categories
+            # Try all categories
             await self.memory_repo.delete_entry(user_id, "profile", key)
             await self.memory_repo.delete_entry(user_id, "fact", key)
+            await self.memory_repo.delete_entry(user_id, "preference", key)
             logger.info("Memory entry deleted", user_id=user_id, key=key)
 
         # Enforce max facts limit

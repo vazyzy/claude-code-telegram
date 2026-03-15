@@ -22,6 +22,7 @@ from .repositories import (
     AuditLogRepository,
     CostTrackingRepository,
     MessageRepository,
+    OpenLoopRepository,
     ProjectThreadRepository,
     SessionRepository,
     ToolUsageRepository,
@@ -47,6 +48,7 @@ class Storage:
         self.costs = CostTrackingRepository(self.db_manager)
         self.analytics = AnalyticsRepository(self.db_manager)
         self.user_memory = UserMemoryRepository(self.db_manager)
+        self.open_loops = OpenLoopRepository(self.db_manager)
 
     async def initialize(self):
         """Initialize storage system."""
