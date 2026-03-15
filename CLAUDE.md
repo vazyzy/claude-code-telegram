@@ -22,7 +22,27 @@ poetry run pytest tests/unit/test_config.py -k test_name -v
 
 # Type checking only
 poetry run mypy src
+
+# Bot lifecycle (tmux-managed)
+make restart          # Kill existing bot + start fresh in tmux session "claude-bot"
+make bot-stop         # Stop the bot tmux session
+make bot-logs         # Show recent bot output from tmux
 ```
+
+### Restarting the Bot
+
+The bot runs in a detached tmux session. After making code changes, restart it with:
+
+```bash
+make restart
+```
+
+This runs `scripts/restart-bot.sh`, which:
+1. Kills the existing `claude-bot` tmux session (if any)
+2. Kills any leftover process on port 8080
+3. Starts a new tmux session with `CLAUDECODE` unset (prevents nested-session errors from claude-agent-sdk)
+
+**Important:** Always use `make restart` instead of `make run` when operating from within a Claude Code session. Running `make run` directly would inherit the `CLAUDECODE` env var, causing the bot's Claude SDK calls to fail with "nested session" errors.
 
 ## Architecture
 
