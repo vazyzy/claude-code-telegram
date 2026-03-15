@@ -170,10 +170,68 @@ class GoogleCalendarClient:
         description: str,
         source_event_id: Optional[str] = None,
     ) -> bool:
-        """Create or update a busy block on Google Calendar.
+        """Create a busy block event on Google Calendar via gws CLI.
 
-        Non-blocking -- returns False on failure.
-        Implemented in T-020.
+        Non-blocking — returns False on any failure so callers are never blocked.
+        Uses ``gws calendar events insert --params <JSON>``.
+
+        Parameters
+        ----------
+        title:
+            Event summary / title shown on the calendar.
+        start / end:
+            Timezone-aware datetimes (UTC is fine; gws accepts ISO 8601 with offset).
+        description:
+            Free-text body of the event.
+        source_event_id:
+            Optional reference stored as a private extended property so the
+            event can be correlated back to a reminder source.
         """
-        # TODO: T-020 will implement this
-        return True
+        body: dict = {
+            "calendarId": self.calendar_id,
+            "summary": title,
+            "description": description,
+            "start": {"dateTime": start.isoformat()},
+            "end": {"dateTime": end.isoformat()},
+        }
+        if source_event_id:
+            body["extendedProperties"] = {
+                "private": {"sourceEventId": source_event_id}
+            }
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self.gws_binary, "calendar", "events", "insert",
+                "--params", json.dumps(body),
+                "--format", "json",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+
+            if proc.returncode != 0:
+                logger.warning(
+                    "gws_calendar_insert_failed",
+                    returncode=proc.returncode,
+                    stderr=stderr.decode().strip()[:200],
+                    title=title,
+                )
+                return False
+
+            logger.info(
+                "gws_calendar_busy_block_created",
+                title=title,
+                start=start.isoformat(),
+                end=end.isoformat(),
+            )
+            return True
+
+        except FileNotFoundError:
+            logger.warning("gws_binary_not_found", gws_binary=self.gws_binary)
+            return False
+        except asyncio.TimeoutError:
+            logger.warning("gws_calendar_insert_timeout", title=title)
+            return False
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("gws_calendar_insert_unexpected_error", error=str(exc))
+            return False
