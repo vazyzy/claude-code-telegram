@@ -307,6 +307,13 @@ class Settings(BaseSettings):
     struggles_md_path: Optional[str] = Field(
         None, description="Path to struggles.md — open loops, blockers, what's hard"
     )
+    principals_md_path: Optional[str] = Field(
+        None,
+        description=(
+            "Path to Character/Principals.md in the Obsidian vault. "
+            "Core identity and philosophy — injected when tone/values framing is needed."
+        ),
+    )
     goals_dir_path: Optional[str] = Field(
         None,
         description=(

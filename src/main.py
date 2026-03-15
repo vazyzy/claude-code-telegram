@@ -157,13 +157,15 @@ async def create_application(config: Settings) -> Dict[str, Any]:
     # Create open loop service for P2 (Open Loops Are Sacred)
     open_loop_service = OpenLoopService(open_loop_repo=storage.open_loops)
 
-    # Create personal context service (reads lifestyle/now/struggles/comms-style/goals)
+    # Create personal context service
+    # (reads lifestyle/now/struggles/principals/comms-style/goals)
     personal_context_service = PersonalContextService(
         lifestyle_md_path=config.lifestyle_md_path,
         now_md_path=config.now_md_path,
         struggles_md_path=config.struggles_md_path,
         communication_style_md_path=config.communication_style_md_path,
         goals_dir_path=config.goals_dir_path,
+        principals_md_path=config.principals_md_path,
     )
 
     claude_integration = ClaudeIntegration(

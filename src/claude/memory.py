@@ -27,8 +27,15 @@ MEMORY_INSTRUCTIONS = (
     "'fact' for factual information, and 'preference' for communication preferences — "
     "e.g. when the user says 'stop doing X', 'I prefer Y', or 'don't ask me about Z', "
     "write a 'preference' entry so the rule persists across sessions. "
+    "Suppression signals ('stop doing X') MUST use category 'preference' — they are "
+    "permanent and never auto-evicted (only 'fact' entries are subject to the 20-entry "
+    "limit; 'preference' and 'profile' entries survive indefinitely). "
     'Example: {"set": [{"category": "preference", "key": "no-daily-standups", '
-    '"value": "Do not suggest daily standups or check-ins"}]}'
+    '"value": "Do not suggest daily standups or check-ins"}]}\n'
+    "Memory capacity: 'fact' entries are capped at 20. When the ## Facts section shows "
+    "18 or more entries, append this note to your response (outside the memory_update "
+    "block): \"Memory is nearly full (N/20 facts stored). Want to go through what's "
+    'stored and trim anything outdated?"'
 )
 
 
